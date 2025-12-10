@@ -1,11 +1,38 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  Typography,
+  Button,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Grid,
+  Card,
+  CardContent,
+  CardActions,
+  IconButton,
+  Chip,
+  Badge,
+  CircularProgress,
+  Alert
+} from '@mui/material';
+import {
+  Add as AddIcon,
+  Edit as EditIcon,
+  DirectionsCar as CarIcon,
+  Message as MessageIcon,
+  Close as CloseIcon,
+  Person as PersonIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon
+} from '@mui/icons-material';
 import { adminAPI } from '../services/adminService';
-import { messageService } from '../services/messageService';
 import CarManager from './CarManager';
-import MessagingModal from './MessagingModal';
-import './DriverManager.css';
+import DriverMessagingModal from './DriverMessagingModal';
 
-const DriverManager = () => {
+const DriverManager = ({ onNavigateToRideHistory }) => {
   const [drivers, setDrivers] = useState([]);
   const [filteredDrivers, setFilteredDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +50,6 @@ const DriverManager = () => {
     email: '',
     phoneNumber: '',
     license: '',
-    password: '',
     userName: ''
   });
 
@@ -34,7 +60,7 @@ const DriverManager = () => {
   const formatPhoneNumber = (value) => {
     // Remove all non-digits
     const phoneNumber = value.replace(/\D/g, '');
-    
+
     // Format as (XXX) XXX-XXXX
     if (phoneNumber.length >= 6) {
       return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
@@ -88,10 +114,6 @@ const DriverManager = () => {
       errors.license = 'Please enter a valid license number (6-15 alphanumeric characters)';
     }
 
-    if (!editingDriver && !formData.password.trim()) {
-      errors.password = 'Password is required';
-    }
-
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -104,10 +126,8 @@ const DriverManager = () => {
   }, []);
 
   useEffect(() => {
-    // Filter drivers based on search term
-    // Ensure drivers is always an array before filtering
     const driversArray = Array.isArray(drivers) ? drivers : [];
-    
+
     if (searchTerm) {
       const filtered = driversArray.filter(driver =>
         (driver.name && driver.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -126,18 +146,15 @@ const DriverManager = () => {
     try {
       setLoading(true);
       const data = await adminAPI.drivers.getAll();
-      
-      // Ensure data is always an array
+
       const driversArray = Array.isArray(data) ? data : [];
-      
+
       setDrivers(driversArray);
       setFilteredDrivers(driversArray);
-      
-      // Load unread counts for all drivers
+
       await loadUnreadCounts();
     } catch (error) {
       console.error('Failed to load drivers:', error);
-      // Set empty arrays on error
       setDrivers([]);
       setFilteredDrivers([]);
     } finally {
@@ -149,20 +166,12 @@ const DriverManager = () => {
     try {
       const driversArray = Array.isArray(drivers) ? drivers : [];
       const counts = {};
-      
-      // Load unread counts for each driver
-      await Promise.all(
-        driversArray.map(async (driver) => {
-          try {
-            const countData = await messageService.getUnreadCount(driver.id);
-            counts[driver.id] = countData.count || 0;
-          } catch (error) {
-            console.error(`Failed to load unread count for driver ${driver.id}:`, error);
-            counts[driver.id] = 0;
-          }
-        })
-      );
-      
+
+      // Set unread counts to 0 for now - can be implemented later if needed
+      driversArray.forEach((driver) => {
+        counts[driver.id] = 0;
+      });
+
       setDriverUnreadCounts(counts);
     } catch (error) {
       console.error('Failed to load unread counts:', error);
@@ -171,17 +180,17 @@ const DriverManager = () => {
 
   const handleInputChange = (field, value) => {
     let processedValue = value;
-    
+
     // Format phone number as user types
     if (field === 'phoneNumber') {
       processedValue = formatPhoneNumber(value);
     }
-    
+
     setFormData(prev => ({
       ...prev,
       [field]: processedValue
     }));
-    
+
     // Clear validation error when user starts typing
     if (validationErrors[field]) {
       setValidationErrors(prev => ({
@@ -193,23 +202,29 @@ const DriverManager = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Validate form before submission
     if (!validateForm()) {
       return;
     }
-    
+
     try {
       if (editingDriver) {
-        await adminAPI.drivers.update(editingDriver.id, formData);
+        await adminAPI.drivers.update(formData);
       } else {
-        await adminAPI.drivers.create(formData);
+        // Include empty password - server will generate the actual password
+        const response = await adminAPI.drivers.create({ ...formData, password: '' });
+
+        // Check if there was a warning (email failed to send)
+        if (response && response.warning) {
+          alert(`Warning: ${response.warning}\n\nTemporary Password: ${response.tempPassword}`);
+        }
       }
-      
+
       // Reload drivers and reset form
       await loadDrivers();
       resetForm();
-      
+
     } catch (error) {
       console.error('Failed to save driver:', error);
       alert('Failed to save driver. Please try again.');
@@ -222,13 +237,12 @@ const DriverManager = () => {
       name: driver.name,
       email: driver.email,
       phoneNumber: driver.phoneNumber,
-      license: driver.license,
-      password: ''
+      license: driver.license
     });
     setShowAddForm(true);
   };
 
-  const handleEditCars = (driver) => {
+  const handleViewCars = (driver) => {
     setSelectedDriverId(driver.id);
     setShowCarManager(true);
   };
@@ -239,25 +253,12 @@ const DriverManager = () => {
     setShowMessaging(true);
   };
 
-  const handleDelete = async (driver) => {
-    if (window.confirm(`Are you sure you want to delete ${driver.name}?`)) {
-      try {
-        await adminAPI.drivers.delete(driver.id);
-        await loadDrivers();
-      } catch (error) {
-        console.error('Failed to delete driver:', error);
-        alert('Failed to delete driver. Please try again.');
-      }
-    }
-  };
-
   const resetForm = () => {
     setFormData({
       name: '',
       email: '',
       phoneNumber: '',
-      license: '',
-      password: ''
+      license: ''
     });
     setValidationErrors({});
     setEditingDriver(null);
@@ -278,12 +279,19 @@ const DriverManager = () => {
   };
 
   if (loading) {
-    return <div className="loading">Loading drivers...</div>;
+    return (
+      <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="400px">
+        <CircularProgress size={60} sx={{ mb: 2 }} />
+        <Typography variant="h6" color="text.secondary">
+          Loading drivers...
+        </Typography>
+      </Box>
+    );
   }
 
   if (showCarManager) {
     return (
-      <CarManager 
+      <CarManager
         driverId={selectedDriverId}
         driverName={drivers.find(d => d.id === selectedDriverId)?.name}
         onClose={handleCarManagerClose}
@@ -292,164 +300,190 @@ const DriverManager = () => {
   }
 
   return (
-    <div className="driver-manager">
-      <div className="manager-header">
-        <div className="search-section">
-          <input
-            type="text"
-            placeholder="Search drivers by name, email, phone, or license..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input"
-          />
-          <button 
-            onClick={() => setShowAddForm(true)} 
-            className="add-btn"
-          >
-            + Add Driver
-          </button>
-        </div>
-      </div>
+    <Box>
+      <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <TextField
+          fullWidth
+          placeholder="Search drivers by name, email, phone, or license..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          sx={{ mr: 2 }}
+        />
+        <Button
+          onClick={() => setShowAddForm(true)}
+          variant="contained"
+          startIcon={<AddIcon />}
+        >
+          Add Driver
+        </Button>
+      </Box>
 
-      {showAddForm && (
-        <div className="form-overlay">
-          <div className="form-modal">
-            <div className="form-header">
-              <h3>{editingDriver ? 'Edit Driver' : 'Add New Driver'}</h3>
-              <button onClick={resetForm} className="close-btn">×</button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="driver-form">
-              <div className="form-group">
-                <label>Name *</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => handleInputChange('name', e.target.value)}
-                  className={validationErrors.name ? 'error' : ''}
-                  required
-                />
-                {validationErrors.name && <span className="error-message">{validationErrors.name}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>Email *</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => handleInputChange('email', e.target.value)}
-                  className={validationErrors.email ? 'error' : ''}
-                  required
-                />
-                {validationErrors.email && <span className="error-message">{validationErrors.email}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>Phone *</label>
-                <input
-                  type="tel"
-                  value={formData.phoneNumber}
-                  onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
-                  className={validationErrors.phoneNumber ? 'error' : ''}
-                  placeholder="(555) 123-4567"
-                  maxLength="14"
-                  required
-                />
-                {validationErrors.phoneNumber && <span className="error-message">{validationErrors.phoneNumber}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>License Number *</label>
-                <input
-                  type="text"
-                  value={formData.license}
-                  onChange={(e) => handleInputChange('license', e.target.value)}
-                  className={validationErrors.license ? 'error' : ''}
-                  placeholder="ABC123DEF45"
-                  maxLength="15"
-                  required
-                />
-                {validationErrors.license && <span className="error-message">{validationErrors.license}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>Password *</label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => handleInputChange('password', e.target.value)}
-                  className={validationErrors.password ? 'error' : ''}
-                  required={!editingDriver}
-                  placeholder={editingDriver ? 'Leave blank to keep current password' : ''}
-                />
-                {validationErrors.password && <span className="error-message">{validationErrors.password}</span>}
-              </div>
-              
-              <div className="form-actions">
-                <button type="button" onClick={resetForm} className="cancel-btn">
-                  Cancel
-                </button>
-                <button type="submit" className="save-btn">
-                  {editingDriver ? 'Update' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <Dialog open={showAddForm} onClose={resetForm} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              {editingDriver ? 'Edit Driver' : 'Add New Driver'}
+            </Typography>
+            <IconButton onClick={resetForm}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
 
-      <div className="drivers-list">
+        <DialogContent>
+          <Box component="form" onSubmit={handleSubmit} sx={{ pt: 2 }}>
+            <TextField
+              fullWidth
+              label="Name"
+              value={formData.name}
+              onChange={(e) => handleInputChange('name', e.target.value)}
+              error={!!validationErrors.name}
+              helperText={validationErrors.name}
+              margin="normal"
+              required
+            />
+
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => handleInputChange('email', e.target.value)}
+              error={!!validationErrors.email}
+              helperText={validationErrors.email}
+              margin="normal"
+              required
+            />
+
+            <TextField
+              fullWidth
+              label="Phone"
+              type="tel"
+              value={formData.phoneNumber}
+              onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+              error={!!validationErrors.phoneNumber}
+              helperText={validationErrors.phoneNumber}
+              placeholder="(555) 123-4567"
+              inputProps={{ maxLength: 14 }}
+              margin="normal"
+              required
+            />
+
+            <TextField
+              fullWidth
+              label="License Number"
+              value={formData.license}
+              onChange={(e) => handleInputChange('license', e.target.value)}
+              error={!!validationErrors.license}
+              helperText={validationErrors.license}
+              placeholder="ABC123DEF45"
+              inputProps={{ maxLength: 15 }}
+              margin="normal"
+              required
+            />
+          </Box>
+        </DialogContent>
+
+        <DialogActions>
+          <Button onClick={resetForm} color="secondary">
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} variant="contained" color="primary">
+            {editingDriver ? 'Update' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Box sx={{ mt: 3 }}>
         {!Array.isArray(filteredDrivers) || filteredDrivers.length === 0 ? (
-          <div className="empty-state">
-            <p>No drivers found.</p>
-          </div>
+          <Box textAlign="center" py={5}>
+            <PersonIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+            <Typography variant="h6" color="text.secondary">
+              No drivers found.
+            </Typography>
+          </Box>
         ) : (
-          <div className="drivers-grid">
+          <Grid container spacing={3}>
             {filteredDrivers.map(driver => (
-              <div key={driver.id} className="driver-card">
-                <div className="driver-info">
-                  <h4>{driver.name}</h4>
-                  <p><strong>Email:</strong> {driver.email}</p>
-                  <p><strong>Phone:</strong> {driver.phoneNumber}</p>
-                  <p><strong>License:</strong> {driver.license}</p>
-                  {/* <p><strong>Rating:</strong> ⭐ {driver.rating}/5.0</p> */}
-                  <p><strong>Joined:</strong> {new Date(driver.joinedDate).toLocaleDateString()}</p>
-                </div>
-                <div className="driver-actions">
-                  <button onClick={() => handleEdit(driver)} className="edit-btn">
-                    Edit
-                  </button>
-                  <button onClick={() => handleEditCars(driver)} className="cars-btn">
-                    Edit Cars
-                  </button>
-                  <div className="message-btn-container">
-                    <button onClick={() => handleMessage(driver)} className="message-btn">
-                      Message
-                    </button>
-                    {driverUnreadCounts[driver.id] > 0 && (
-                      <span className="unread-badge">
-                        {driverUnreadCounts[driver.id]}
-                      </span>
-                    )}
-                  </div>
-                  {/* <button onClick={() => handleDelete(driver)} className="delete-btn">
-                    Delete
-                  </button> */}
-                </div>
-              </div>
+              <Grid item xs={12} sm={6} lg={4} key={driver.id}>
+                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <CardContent sx={{ flexGrow: 1 }}>
+                    <Typography variant="h6" component="h4" gutterBottom>
+                      {driver.name}
+                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1} mb={1}>
+                      <EmailIcon fontSize="small" color="action" />
+                      <Typography variant="body2" color="text.secondary">
+                        {driver.email}
+                      </Typography>
+                    </Box>
+                    <Box display="flex" alignItems="center" gap={1} mb={1}>
+                      <PhoneIcon fontSize="small" color="action" />
+                      <Typography variant="body2" color="text.secondary">
+                        {driver.phoneNumber}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      <strong>License:</strong> {driver.license}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      <strong>Joined:</strong> {new Date(driver.joinedDate).toLocaleDateString()}
+                    </Typography>
+                  </CardContent>
+                  <CardActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+                    <Button
+                      onClick={() => handleEdit(driver)}
+                      startIcon={<EditIcon />}
+                      color="warning"
+                      variant="outlined"
+                      size="small"
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      onClick={() => handleViewCars(driver)}
+                      startIcon={<CarIcon />}
+                      color="info"
+                      variant="outlined"
+                      size="small"
+                    >
+                      View Cars
+                    </Button>
+                    <Box position="relative">
+                      <Button
+                        onClick={() => handleMessage(driver)}
+                        startIcon={<MessageIcon />}
+                        color="primary"
+                        variant="outlined"
+                        size="small"
+                      >
+                        Message
+                      </Button>
+                      {driverUnreadCounts[driver.id] > 0 && (
+                        <Badge
+                          badgeContent={driverUnreadCounts[driver.id]}
+                          color="error"
+                          sx={{ position: 'absolute', top: -8, right: -8 }}
+                        />
+                      )}
+                    </Box>
+                  </CardActions>
+                </Card>
+              </Grid>
             ))}
-          </div>
+          </Grid>
         )}
-      </div>
+      </Box>
 
       {/* Messaging Modal */}
-      <MessagingModal
+      <DriverMessagingModal
         isOpen={showMessaging}
         onClose={handleMessagingClose}
         driverId={messagingDriverId}
         driverName={messagingDriverName}
+        onNavigateToRideHistory={onNavigateToRideHistory}
       />
-    </div>
+    </Box>
   );
 };
 

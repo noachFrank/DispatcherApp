@@ -1,13 +1,34 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  Box,
+  Typography,
+  Tabs,
+  Tab,
+  Paper,
+  CircularProgress,
+  Alert,
+  Container
+} from '@mui/material';
+import { Lock as LockIcon, Person as PersonIcon, DirectionsCar as CarIcon } from '@mui/icons-material';
 import { adminAPI } from '../services/adminService';
 import { useAuth } from '../contexts/AuthContext';
 import DispatcherManager from './DispatcherManager';
 import DriverManager from './DriverManager';
-import './AdminManagement.css';
 
-const AdminManagement = () => {
+const AdminManagement = ({ onNavigateToRideHistory }) => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('dispatchers');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Get initial tab from URL
+  const getTabFromUrl = () => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    return tab === 'drivers' ? 'drivers' : 'dispatchers';
+  };
+
+  const [activeTab, setActiveTab] = useState(getTabFromUrl);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -15,18 +36,32 @@ const AdminManagement = () => {
     checkAdminAccess();
   }, [user]);
 
+  // Sync tab with URL on location change
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab === 'drivers' || tab === 'dispatchers') {
+      setActiveTab(tab);
+    }
+  }, [location.search]);
+
+  const handleTabChange = (event, newValue) => {
+    const tab = newValue === 0 ? 'dispatchers' : 'drivers';
+    setActiveTab(tab);
+    navigate(`/dashboard/admin?tab=${tab}`, { replace: true });
+  };
+
   const checkAdminAccess = async () => {
     try {
       setLoading(true);
-      
+
       if (!user?.userId) {
         setIsAuthorized(false);
         return;
       }
-      
-      const roleData = await adminAPI.user.checkRole(user.userId);
-      
-      // The API returns { isAdmin: boolean }
+
+      const roleData = await adminAPI.user.isAdmin(user.userId);
+
       setIsAuthorized(roleData.isAdmin);
     } catch (error) {
       console.error('Failed to check admin access:', error);
@@ -39,60 +74,74 @@ const AdminManagement = () => {
   if (loading) {
     console.log('loading');
     return (
-      <div className="admin-management">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Checking permissions...</p>
-        </div>
-      </div>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="400px">
+          <CircularProgress size={60} sx={{ mb: 2 }} />
+          <Typography variant="h6" color="text.secondary">
+            Checking permissions...
+          </Typography>
+        </Box>
+      </Container>
     );
   }
 
   if (!isAuthorized) {
-    console.log('User is not authorized to access Admin Management');
     return (
-      <div className="admin-management">
-        <div className="unauthorized-state">
-          <div className="unauthorized-icon">🔒</div>
-          <h2>Access Denied</h2>
-          <p>You don't have permission to access this page.</p>
-          <p>Contact your administrator if you believe this is an error.</p>
-        </div>
-      </div>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="400px">
+          <LockIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
+          <Typography variant="h4" gutterBottom>
+            Access Denied
+          </Typography>
+          <Typography variant="body1" color="text.secondary" textAlign="center" mb={2}>
+            You don't have permission to access this page.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" textAlign="center">
+            Contact your administrator if you believe this is an error.
+          </Typography>
+        </Box>
+      </Container>
     );
   }
 
-  console.log('User is authorized to access Admin Management');
-  
+
   return (
-    <div className="admin-management">
-      <div className="admin-header">
-        <h1>Admin Management</h1>
-        <div className="user-info">
-          <span>Welcome, <strong>{user?.username || 'Admin'}</strong></span>
-        </div>
-      </div>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Paper elevation={3} sx={{ p: 3 }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h4" component="h1">
+              Admin Management
+            </Typography>
+            <Typography variant="subtitle1" color="text.secondary">
+              Welcome, <strong>{user?.username || 'Admin'}</strong>
+            </Typography>
+          </Box>
 
-      <div className="admin-tabs">
-        <button 
-          className={`tab-btn ${activeTab === 'dispatchers' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dispatchers')}
-        >
-          Dispatchers
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'drivers' ? 'active' : ''}`}
-          onClick={() => setActiveTab('drivers')}
-        >
-          Drivers & Cars
-        </button>
-      </div>
+          <Tabs
+            value={activeTab === 'dispatchers' ? 0 : 1}
+            onChange={handleTabChange}
+            sx={{ borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab
+              icon={<PersonIcon />}
+              label="Dispatchers"
+              iconPosition="start"
+            />
+            <Tab
+              icon={<CarIcon />}
+              label="Drivers & Cars"
+              iconPosition="start"
+            />
+          </Tabs>
+        </Box>
 
-      <div className="admin-content">
-        {activeTab === 'dispatchers' && <DispatcherManager />}
-        {activeTab === 'drivers' && <DriverManager />}
-      </div>
-    </div>
+        <Box sx={{ mt: 3 }}>
+          {activeTab === 'dispatchers' && <DispatcherManager />}
+          {activeTab === 'drivers' && <DriverManager onNavigateToRideHistory={onNavigateToRideHistory} />}
+        </Box>
+      </Paper>
+    </Container>
   );
 };
 

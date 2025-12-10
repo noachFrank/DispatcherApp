@@ -1,4 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Typography,
+  Button,
+  Card,
+  CardContent,
+  Box,
+  Chip,
+  IconButton,
+  Alert
+} from '@mui/material';
+import { Close as CloseIcon, CreditCard as CreditCardIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { creditCardStorage } from '../utils/creditCardStorage';
 
 const SavedCreditCards = ({ onClose }) => {
@@ -18,72 +33,77 @@ const SavedCreditCards = ({ onClose }) => {
   const cardEntries = Object.entries(savedCards);
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 1000
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        padding: '20px',
-        borderRadius: '8px',
-        maxWidth: '600px',
-        width: '90%',
-        maxHeight: '80vh',
-        overflow: 'auto'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3>Saved Credit Card Details</h3>
-          <button onClick={onClose} style={{ fontSize: '20px', border: 'none', background: 'none', cursor: 'pointer' }}>×</button>
-        </div>
+    <Dialog open={true} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box display="flex" alignItems="center" gap={1}>
+            <CreditCardIcon />
+            <Typography variant="h6">Saved Credit Card Details</Typography>
+          </Box>
+          <IconButton onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </DialogTitle>
 
+      <DialogContent>
         {cardEntries.length === 0 ? (
-          <p>No credit card details saved.</p>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            No credit card details saved.
+          </Alert>
         ) : (
-          <>
-            <div style={{ marginBottom: '20px' }}>
-              <button onClick={handleClearAll} style={{
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}>
+          <Box>
+            <Box sx={{ mb: 3 }}>
+              <Button
+                onClick={handleClearAll}
+                variant="contained"
+                color="error"
+                startIcon={<DeleteIcon />}
+              >
                 Clear All
-              </button>
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              </Button>
+            </Box>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {Array.isArray(cardEntries) && cardEntries.map(([key, card]) => (
-                <div key={key} style={{
-                  border: '1px solid #ddd',
-                  borderRadius: '6px',
-                  padding: '15px',
-                  backgroundColor: '#f8f9fa'
-                }}>
-                  <div><strong>Card Key:</strong> {key}</div>
-                  <div><strong>Last 4 digits:</strong> ****{card.ccNumber.slice(-4)}</div>
-                  <div><strong>Expiry:</strong> {card.expiryDate}</div>
-                  <div><strong>Zip Code:</strong> {card.zipCode}</div>
-                  <div><strong>Saved:</strong> {new Date(card.savedAt).toLocaleString()}</div>
-                  <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
-                    <em>CVV is stored but not displayed for security</em>
-                  </div>
-                </div>
+                <Card key={key} variant="outlined">
+                  <CardContent>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Typography variant="subtitle2" color="primary">
+                        <strong>Card Key:</strong> {key}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Last 4 digits:</strong> ****{card.ccNumber.slice(-4)}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Expiry:</strong> {card.expiryDate}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Zip Code:</strong> {card.zipCode}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Saved:</strong> {new Date(card.savedAt).toLocaleString()}
+                      </Typography>
+                      <Chip
+                        label="CVV is stored but not displayed for security"
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        sx={{ mt: 1, alignSelf: 'flex-start' }}
+                      />
+                    </Box>
+                  </CardContent>
+                </Card>
               ))}
-            </div>
-          </>
+            </Box>
+          </Box>
         )}
-      </div>
-    </div>
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
   );
 };
 

@@ -1,11 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { ridesAPI, driversAPI } from '../services/dashboardService';
-import './DetailView.css';
+import {
+  Box,
+  Typography,
+  Button,
+  Card,
+  CardContent,
+  Grid,
+  Chip,
+  CircularProgress,
+  Alert,
+  Divider,
+  Paper
+} from '@mui/material';
+import { formatDateTime, formatDate } from '../utils/dateHelpers';
+import {
+  ArrowBack as ArrowBackIcon,
+  Refresh as RefreshIcon,
+  DirectionsCar as CarIcon,
+  Person as PersonIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon,
+  LocationOn as LocationIcon,
+  AccessTime as TimeIcon
+} from '@mui/icons-material';
+import { ridesAPI, driversAPI } from '../services/apiService';
+import { getRideStatus, getRideStatusColor, getDriverStatusColor } from '../utils/Status';
+
 
 const DetailView = ({ itemType, itemId, onBackToList }) => {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState('');
 
   useEffect(() => {
     loadItemDetails();
@@ -19,10 +45,15 @@ const DetailView = ({ itemType, itemId, onBackToList }) => {
       let data;
       if (itemType === 'ride') {
         data = await ridesAPI.getById(itemId);
+        const rideStatus = getRideStatus(data);
+        setStatus(rideStatus);
       } else if (itemType === 'driver') {
         data = await driversAPI.getById(itemId);
+        console.log('driver data:', data);
+        const driverStatus = await driversAPI.getDriverStatus(data.id);
+        setStatus(driverStatus);
       }
-
+      console.log(`${itemType} details:`, data);
       setItem(data);
     } catch (err) {
       console.error(`Failed to load ${itemType} details:`, err);
@@ -33,199 +64,346 @@ const DetailView = ({ itemType, itemId, onBackToList }) => {
   };
 
   const renderRideDetails = (ride) => (
-    <div className="detail-content">
-      <div className="detail-section">
-        <h3>Ride Information</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Ride ID:</span>
-            <span className="detail-value">#{ride.id}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Status:</span>
-            <span className={`detail-value status-badge ${ride.status}`}>
-              {ride.status}
-            </span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Created:</span>
-            <span className="detail-value">
-              {ride.createdAt ? new Date(ride.createdAt).toLocaleString() : 'N/A'}
-            </span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Estimated Time:</span>
-            <span className="detail-value">{ride.estimatedTime || 'N/A'}</span>
-          </div>
-        </div>
-      </div>
+    console.log('ride details', ride),
+    <Grid container spacing={3}>
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom color="primary">
+              Ride Information
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Ride ID:</Typography>
+                <Typography variant="body1">#{ride.rideId}</Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Status:</Typography>
+                <Chip
+                  label={status}
+                  color={getRideStatusColor(status)}
+                  size="small"
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Passengers:</Typography>
+                <Typography variant="body1">{ride.passengers || 1}</Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Car Type:</Typography>
+                <Typography variant="body1">{['Car', 'SUV', 'MiniVan', '12 Passenger', '15 Passenger', 'Luxury SUV'][ride.carType] || 'Car'}</Typography>
+              </Grid>
+              {ride.scheduledFor === ride.callTime ? (
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Created and Scheduled:</Typography>
+                  <Typography variant="body1">
+                    {ride.scheduledFor ? formatDateTime(ride.scheduledFor) : 'N/A'}
+                  </Typography>
+                </Grid>
+              ) : (
+                <>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Scheduled:</Typography>
+                    <Typography variant="body1">
+                      {ride.scheduledFor ? formatDateTime(ride.scheduledFor) : 'N/A'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Created:</Typography>
+                    <Typography variant="body1">
+                      {ride.callTime ? formatDateTime(ride.callTime) : 'N/A'}
+                    </Typography>
+                  </Grid>
+                </>
+              )}
 
-      <div className="detail-section">
-        <h3>Customer Information</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Customer ID:</span>
-            <span className="detail-value">#{ride.customerId}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Name:</span>
-            <span className="detail-value">{ride.customerName || 'N/A'}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Phone:</span>
-            <span className="detail-value">{ride.customerNumber || 'N/A'}</span>
-          </div>
-        </div>
-      </div>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
 
-      <div className="detail-section">
-        <h3>Route Information</h3>
-        <div className="detail-grid">
-          <div className="detail-item full-width">
-            <span className="detail-label">Pickup Location:</span>
-            <span className="detail-value">{ride.pickup}</span>
-          </div>
-          <div className="detail-item full-width">
-            <span className="detail-label">Destination:</span>
-            <span className="detail-value">{ride.destination}</span>
-          </div>
-        </div>
-      </div>
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom color="primary">
+              Customer Information
+            </Typography>
+            <Grid container spacing={2}>
+              {ride.customerName &&
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Name:</Typography>
+                  <Typography variant="body1">{ride.customerName || 'N/A'}</Typography>
+                </Grid>
+              }
+              <Grid item xs={12}>
+                <Box display="flex" alignItems="center" gap={1}>
+                  <PhoneIcon fontSize="small" color="action" />
+                  <Typography variant="body1">{ride.customerPhoneNumber || 'N/A'}</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
 
-      <div className="detail-section">
-        <h3>Driver & Payment</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Driver ID:</span>
-            <span className="detail-value">#{ride.driverId || 'Unassigned'}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Driver Name:</span>
-            <span className="detail-value">{ride.driverName || 'N/A'}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Fare:</span>
-            <span className="detail-value">{ride.fare || 'N/A'}</span>
-          </div>
-        </div>
-      </div>
-    </div>
+      <Grid item xs={12}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom color="primary">
+              Route Information
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <Box display="flex" alignItems="center" gap={1} mb={1}>
+                  <LocationIcon fontSize="small" color="success" />
+                  <Typography variant="body2" color="text.secondary">Pickup Location:</Typography>
+                </Box>
+                <Typography variant="body1">{ride.route.pickup}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box display="flex" alignItems="center" gap={1} mb={1}>
+                  <LocationIcon fontSize="small" color="error" />
+                  <Typography variant="body2" color="text.secondary">Destination:</Typography>
+                </Box>
+                <Typography variant="body1">{ride.route.dropOff}</Typography>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
+
+      <Grid item xs={12}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom color="primary">
+              Driver & Payment
+            </Typography>
+            <Grid container spacing={2}>
+              {ride.assignedToId &&
+                <><Grid item xs={4}>
+                  <Typography variant="body2" color="text.secondary">Driver ID:</Typography>
+                  <Typography variant="body1">{`#${ride.assignedToId}` || 'Unassigned'}</Typography>
+                </Grid>
+
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="text.secondary">Driver Name:</Typography>
+                    <Typography variant="body1">{ride.assignedTo?.name || 'N/A'}</Typography>
+                  </Grid>
+                </>
+              }
+              {((ride.reassigned && !ride.reassignedToId) || !ride.assignedToId) &&
+                <Grid item xs={4}>
+                  <Typography variant="body2" color="text.warning">Unassigned</Typography>
+                </Grid>
+              }
+
+              <Grid item xs={4}>
+                <Typography variant="body2" color="text.secondary">Fare:</Typography>
+                <Typography variant="body1" color="primary" fontWeight="bold">
+                  ${ride.cost || 0}
+                </Typography>
+              </Grid>
+              <Grid item xs={4}>
+                <Typography variant="body2" color="text.secondary">Driver's Comp:</Typography>
+                <Typography variant="body1" color="primary" fontWeight="bold">
+                  ${ride.driversCompensation || 0}
+                </Typography>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid>
+    </Grid>
   );
 
-  const renderDriverDetails = (driver) => (
-    <div className="detail-content">
-      <div className="detail-section">
-        <h3>Driver Information</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Driver ID:</span>
-            <span className="detail-value">#{driver.id}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Name:</span>
-            <span className="detail-value">{driver.name}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Status:</span>
-            <span className={`detail-value status-badge ${driver.status}`}>
-              {driver.status}
-            </span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Currently Driving:</span>
-            <span className="detail-value">
-              {driver.isCurrentlyDriving ? 'Yes' : 'No'}
-            </span>
-          </div>
-        </div>
-      </div>
+  const renderDriverDetails = (driver) => {
+    const primaryCar = driver.cars.find(c => c.isPrimary) ?? driver.cars[0];
+    return (
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom color="primary">
+                Driver Information
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Driver ID:</Typography>
+                  <Typography variant="body1">#{driver.id}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Name:</Typography>
+                  <Typography variant="body1">{driver.name}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Status:</Typography>
+                  <Chip
+                    label={status}
+                    color={getDriverStatusColor(status)}
+                    size="small"
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Currently Driving:</Typography>
+                  <Chip
+                    label={status === 'En-Route' || status === 'Driving' || status === 'Active' ? 'Yes' : 'No'}
+                    color={status === 'En-Route' || status === 'Driving' || status === 'Active' ? 'warning' : 'default'}
+                    size="small"
+                  />
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
 
-      <div className="detail-section">
-        <h3>Contact Information</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Phone:</span>
-            <span className="detail-value">{driver.phone}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Email:</span>
-            <span className="detail-value">{driver.email || 'N/A'}</span>
-          </div>
-        </div>
-      </div>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom color="primary">
+                Contact Information
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <PhoneIcon fontSize="small" color="action" />
+                    <Typography variant="body2" color="text.secondary">Phone:</Typography>
+                  </Box>
+                  <Typography variant="body1">{driver.phoneNumber}</Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <EmailIcon fontSize="small" color="action" />
+                    <Typography variant="body2" color="text.secondary">Email:</Typography>
+                  </Box>
+                  <Typography variant="body1">{driver.email || 'N/A'}</Typography>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom color="primary">
+                Vehicle Information
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <CarIcon fontSize="small" color="action" />
+                    <Typography variant="body2" color="text.secondary">Vehicle:</Typography>
+                  </Box>
+                  <Typography variant="body1">{primaryCar?.make || 'N/A'} {primaryCar?.model || ''} {`(${primaryCar?.year})` || ''}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">License  Plate Number:</Typography>
+                  <Typography variant="body1">{primaryCar?.licensePlate || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Color:</Typography>
+                  <Typography variant="body1">{primaryCar?.color || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Type:</Typography>
+                  <Typography variant="body1">{primaryCar?.type || 'N/A'}</Typography>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
 
-      <div className="detail-section">
-        <h3>Vehicle Information</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Vehicle:</span>
-            <span className="detail-value">{driver.vehicle || 'N/A'}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">License Number:</span>
-            <span className="detail-value">{driver.licenseNumber || 'N/A'}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="detail-section">
-        <h3>Performance</h3>
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Rating:</span>
-            <span className="detail-value">
-              {driver.rating ? `${driver.rating}/5.0` : 'N/A'}
-            </span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Total Rides:</span>
-            <span className="detail-value">{driver.totalRides || '0'}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Joined Date:</span>
-            <span className="detail-value">
-              {driver.joinedDate ? new Date(driver.joinedDate).toLocaleDateString() : 'N/A'}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+        {/* <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom color="primary">
+              Performance
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={4}>
+                <Typography variant="body2" color="text.secondary">Rating:</Typography>
+                <Typography variant="body1" color="warning.main" fontWeight="bold">
+                  {driver.rating ? `${driver.rating}/5.0` : 'N/A'}
+                </Typography>
+              </Grid>
+              <Grid item xs={4}>
+                <Typography variant="body2" color="text.secondary">Total Rides:</Typography>
+                <Typography variant="body1" color="primary" fontWeight="bold">
+                  {driver.totalRides || '0'}
+                </Typography>
+              </Grid>
+              <Grid item xs={4}>
+                <Typography variant="body2" color="text.secondary">Joined Date:</Typography>
+                <Typography variant="body1">
+                  {driver.joinedDate ? formatDate(driver.joinedDate) : 'N/A'}
+                </Typography>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      </Grid> */}
+      </Grid>
+    )
+  };
 
   if (loading) {
     return (
-      <div className="detail-view">
-        <div className="loading">Loading {itemType} details...</div>
-      </div>
+      <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="400px">
+        <CircularProgress size={60} sx={{ mb: 2 }} />
+        <Typography variant="h6" color="text.secondary">
+          Loading {itemType} details...
+        </Typography>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="detail-view">
-        <div className="error">{error}</div>
-        <button onClick={onBackToList} className="back-btn">Back to List</button>
-      </div>
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+        <Button
+          onClick={onBackToList}
+          startIcon={<ArrowBackIcon />}
+          variant="outlined"
+        >
+          Back to List
+        </Button>
+      </Box>
     );
   }
 
   return (
-    <div className="detail-view">
-      <div className="detail-header">
-        <button onClick={onBackToList} className="back-btn">
-          ← Back to List
-        </button>
-        <h2>
-          {itemType === 'ride' ? `Ride #${item?.id}` : `Driver: ${item?.name}`}
-        </h2>
-        <button onClick={loadItemDetails} className="refresh-btn">
-          Refresh
-        </button>
-      </div>
+    <Box sx={{ p: 3 }}>
+      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Button
+            onClick={onBackToList}
+            startIcon={<ArrowBackIcon />}
+            variant="outlined"
+          >
+            Back to List
+          </Button>
+          <Box display="flex" alignItems="center" gap={1}>
+            {itemType === 'ride' ? <CarIcon /> : <PersonIcon />}
+            <Typography variant="h5">
+              {itemType === 'ride' ? `RideId ${item?.rideId}` : `Driver: ${item?.name}`}
+            </Typography>
+          </Box>
+          <Button
+            onClick={loadItemDetails}
+            startIcon={<RefreshIcon />}
+            variant="contained"
+            color="primary"
+          >
+            Refresh
+          </Button>
+        </Box>
+      </Paper>
 
       {itemType === 'ride' && item && renderRideDetails(item)}
       {itemType === 'driver' && item && renderDriverDetails(item)}
-    </div>
+    </Box>
   );
 };
 

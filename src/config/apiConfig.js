@@ -1,10 +1,11 @@
+import axios from 'axios';
 import environmentConfig from './environment';
 
 // API Configuration
 const config = {
   // Base API URL - automatically determined by environment
   API_BASE_URL: environmentConfig.API_BASE_URL,
-  
+
   // API Endpoints
   ENDPOINTS: {
     AUTH: {
@@ -14,15 +15,8 @@ const config = {
     },
     USER: {
       GET_PROFILE: '/api/user/profile',
-      CHECK_ROLE: '/api/User/checkRole'
+      IS_ADMIN: '/api/User/isAdmin'
     },
-    // CALLS: {
-    //   CREATE: '/api/calls',
-    //   GET_ALL: '/api/calls',
-    //   GET_BY_ID: '/api/calls',
-    //   UPDATE: '/api/calls',
-    //   DELETE: '/api/calls'
-    //},
     RIDES: {
       CREATE: '/api/Ride/AddRide',
       GET_ALL: '/api/Ride/Open',
@@ -31,137 +25,172 @@ const config = {
       GET_IN_PROGRESS: '/api/Ride/CurrentlyBeingDriven',
       GET_FUTURE: '/api/Ride/FutureRides',
       GET_TODAY: '/api/Ride/TodaysRides',
+      GET_OPEN: '/api/Ride/Open',
+      GET_THIS_WEEK: '/api/Ride/RidesThisWeek',
+      GET_ALL_HISTORY: '/api/Ride/AllRides',
       UPDATE: '/api/rides',
-      DELETE: '/api/rides',
+      // DELETE: '/api/rides',
       ASSIGN: '/api/Ride/AssignToDriver',
-      CANCEL: '/api/Ride/Cancel',
+      CANCEL: '/api/Ride/CancelRide',
       REASSIGN: '/api/Ride/Reassign',
       PICKUP: '/api/Ride/Pickup',
       DROPOFF: '/api/Ride/Dropoff',
       UPDATE_STATUS: '/api/Ride/UpdateStatus'
     },
-    // ROUTES: {
-    //   CREATE: '/api/Ride/AddRide',
-    //   GET_ALL: '/api/routes',
-    //   GET_BY_ID: '/api/routes',
-    //   UPDATE: '/api/routes',
-    //   DELETE: '/api/routes'
-    // },
     DRIVERS: {
       GET_ALL: '/api/User/AllDrivers',
       GET_BY_ID: '/api/User/DriverById',
-      //GET_AVAILABLE: '/api/User/ActiveDrivers',
       GET_ACTIVE: '/api/User/ActiveDrivers',
       GET_DRIVING: '/api/User/ActiveDriversOnCall',
+      GET_DRIVERS_DRIVING: '/api/User/getDriversDriving',
+      GET_ONLINE_DRIVERS: '/api/User/getOnlineDrivers',
       CREATE: '/api/User/AddDriver',
       UPDATE: '/api/User/UpdateDriver',
-      DELETE: '/api/User/DeleteDriver',
-      UPDATE_STATUS: '/api/drivers/status'
+      GET_DRIVER_STATUS: '/api/User/getDriverStatus',
     },
     DISPATCHERS: {
       GET_ACTIVE: '/api/User/ActiveDispatchers',
       GET_BY_ID: '/api/User/DispatcherById',
       CREATE: '/api/User/AddDispatcher',
       UPDATE: '/api/User/UpdateDispatcher',
-      DELETE: '/api/User/DeleteDispatcher'
     },
     CARS: {
-      GET_BY_DRIVER: '/api/User/CarsByDriver',
+      GET_BY_DRIVER: '/api/User/getCars',
       CREATE: '/api/User/AddCar',
-      UPDATE: '/api/User/UpdateCar',
-      DELETE: '/api/User/DeleteCar'
+      // UPDATE: '/api/User/UpdateCar',
     },
     MESSAGES: {
-      SEND_MESSAGE: '/api/Communication/AddCom', 
+      SEND_MESSAGE: '/api/Communication/AddCom',
       GET_TODAY_MESSAGES: '/api/Communication/TodaysCom',
       GET_ALL_MESSAGES: '/api/Communication/AllCom',
+      GET_BROADCAST_MESSAGES: '/api/Communication/BroadcastComs',
+      GET_UNREAD_COUNT: '/api/Communication/driverUnreadCount',
       MARK_READ: '/api/Communication/MarkAsRead',
-      GET_UNREAD_COUNT: '/api/messages/unreadCount'
-    },
-    // DRIVER_CALLS: {
-    //   ASSIGN_TO_DRIVER: '/api/calls/assign',
-    //   UPDATE_STATUS: '/api/calls/status',
-    //   CANCEL_CALL: '/api/calls/cancel',
-    //   REASSIGN_CALL: '/api/calls/reassign'
-    // }
+      // GET_UNREAD_COUNT: '/api/messages/unreadCount',
+      GET_UNREAD: '/api/Communication/Unread',
+
+    }
   },
-  
+
   // Request timeout in milliseconds
-  TIMEOUT: 10000,
-  
-  // Default headers for API requests
-  DEFAULT_HEADERS: {
+  TIMEOUT: 10000
+};
+
+// Create axios instance with default configuration
+const apiClient = axios.create({
+  baseURL: config.API_BASE_URL,
+  timeout: config.TIMEOUT,
+  headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   }
-};
+});
 
-// Helper function to build full API URLs
-export const buildApiUrl = (endpoint) => {
-  return `${config.API_BASE_URL}${endpoint}`;
-};
+// JWT Token Management
+const TOKEN_KEY = 'dispatch_jwt_token';
 
-// Helper function to make API requests with consistent configuration
-export const apiRequest = async (endpoint, options = {}) => {
-  const url = buildApiUrl(endpoint);
-  
-  const defaultOptions = {
-    timeout: config.TIMEOUT,
-    headers: {
-      ...config.DEFAULT_HEADERS,
-      ...options.headers
+export const tokenManager = {
+  getToken: () => {
+    return localStorage.getItem(TOKEN_KEY);
+  },
+
+  setToken: (token) => {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
     }
-  };
+  },
 
-  const requestOptions = {
-    ...defaultOptions,
-    ...options
-  };
+  removeToken: () => {
+    localStorage.removeItem(TOKEN_KEY);
+  },
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.TIMEOUT);
-
-    // console.log('Making API request to:', url);
-    // console.log('Request method:', requestOptions.method || 'GET');
-    //console.log('Request headers:', requestOptions.headers);
-    // console.log('Request body:', requestOptions.body);
-    
-    const response = await fetch(url, {
-      ...requestOptions,
-      signal: controller.signal
-    });
-    
-    console.log('Response status:', response.status, response.url);
-   // console.log('Response headers:', Object.fromEntries(response.headers));
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      let errorMessage = `HTTP error! status: ${response.status}`;
-      try {
-        const errorBody = await response.text();
-        console.error('API Error Response:', errorBody);
-        errorMessage += ` - ${errorBody}`;
-      } catch (e) {
-        // If we can't read the error body, just use the status
-      }
-      throw new Error(errorMessage);
-    }
-
-    const responseText = await response.text();
-    return responseText ? JSON.parse(responseText) : {};
-  } catch (error) {
-    console.error('API request failed:', {
-      url,
-      method: requestOptions.method || 'GET',
-      headers: requestOptions.headers,
-      body: requestOptions.body,
-      error: error.message
-    });
-    throw error;
+  hasToken: () => {
+    return !!localStorage.getItem(TOKEN_KEY);
   }
 };
 
-// Export the config for direct access
+// Request interceptor - adds JWT token to all requests
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = tokenManager.getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // Log request details in development
+    if (import.meta.env.DEV) {
+      console.log('API Request:', {
+        method: config.method?.toUpperCase(),
+        url: config.url,
+        hasToken: !!token
+      });
+    }
+
+    return config;
+  },
+  (error) => {
+    console.error('Request interceptor error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor - handles errors and token refresh
+apiClient.interceptors.response.use(
+  (response) => {
+    // Log response in development
+    if (import.meta.env.DEV) {
+      console.log('API Response:', {
+        status: response.status,
+        url: response.config.url
+      });
+    }
+
+    return response;
+  },
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Handle 401 Unauthorized - token expired or invalid
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      // Try to refresh token
+      try {
+        const response = await axios.post(
+          `${config.API_BASE_URL}${config.ENDPOINTS.AUTH.REFRESH}`,
+          {},
+          {
+            headers: {
+              Authorization: `Bearer ${tokenManager.getToken()}`
+            }
+          }
+        );
+
+        if (response.data?.token) {
+          tokenManager.setToken(response.data.token);
+          originalRequest.headers.Authorization = `Bearer ${response.data.token}`;
+          return apiClient(originalRequest);
+        }
+      } catch (refreshError) {
+        // Refresh failed - clear token and redirect to login
+        tokenManager.removeToken();
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
+      }
+    }
+
+    // Log error details
+    console.error('API Error:', {
+      status: error.response?.status,
+      message: error.message,
+      url: error.config?.url,
+      data: error.response?.data
+    });
+
+    return Promise.reject(error);
+  }
+);
+
+// Export the axios instance and config
+export { apiClient };
 export default config;

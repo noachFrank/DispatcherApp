@@ -12,6 +12,7 @@ const environments = {
 
 // Determine current environment
 const getCurrentEnvironment = () => {
+  console.log(import.meta.env);
   return import.meta.env.MODE || 'development';
 };
 

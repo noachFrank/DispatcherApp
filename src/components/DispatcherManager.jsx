@@ -1,6 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { adminAPI } from '../services/adminService';
-import './DispatcherManager.css';
+import {
+  Box,
+  Card,
+  CardContent,
+  CardActions,
+  TextField,
+  Button,
+  Typography,
+  Grid,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControlLabel,
+  Switch,
+  IconButton
+} from '@mui/material';
+import {
+  Add as AddIcon,
+  Edit as EditIcon,
+  Close as CloseIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon
+} from '@mui/icons-material';
 
 const DispatcherManager = () => {
   const [dispatchers, setDispatchers] = useState([]);
@@ -11,20 +36,18 @@ const DispatcherManager = () => {
   const [editingDispatcher, setEditingDispatcher] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    userName: '',
     email: '',
     phoneNumber: '',
-    password: '',
     isActive: true,
     isAdmin: false,
     DateJoined: new Date().toISOString().split('T')[0],
-
+    userName: '',
   });
 
   // Helper function to safely format dates
   const formatDate = (dateValue) => {
     if (!dateValue) return 'N/A';
-    
+
     try {
       // If it's already a Date object
       if (dateValue instanceof Date) {
@@ -34,13 +57,13 @@ const DispatcherManager = () => {
           day: 'numeric'
         });
       }
-      
+
       // If it's a string, try to parse it
       const date = new Date(dateValue);
       if (isNaN(date.getTime())) {
         return dateValue; // Return original if can't parse
       }
-      
+
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
@@ -59,7 +82,7 @@ const DispatcherManager = () => {
   const formatPhoneNumber = (value) => {
     // Remove all non-digits
     const phoneNumber = value.replace(/\D/g, '');
-    
+
     // Format as (XXX) XXX-XXXX
     if (phoneNumber.length >= 6) {
       return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
@@ -101,10 +124,6 @@ const DispatcherManager = () => {
       errors.phoneNumber = 'Please enter a valid 10-digit phone number';
     }
 
-    if (!editingDispatcher && !formData.password.trim()) {
-      errors.password = 'Password is required';
-    }
-
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -114,10 +133,8 @@ const DispatcherManager = () => {
   }, []);
 
   useEffect(() => {
-    // Filter dispatchers based on search term
-    // Ensure dispatchers is always an array before filtering
     const dispatchersArray = Array.isArray(dispatchers) ? dispatchers : [];
-    
+
     if (searchTerm) {
       const filtered = dispatchersArray.filter(dispatcher =>
         (dispatcher.name && dispatcher.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -134,10 +151,10 @@ const DispatcherManager = () => {
     try {
       setLoading(true);
       const data = await adminAPI.dispatchers.getActive();
-      
+
       // Ensure data is always an array
       const dispatchersArray = Array.isArray(data) ? data : [];
-      
+
       setDispatchers(dispatchersArray);
       setFilteredDispatchers(dispatchersArray);
     } catch (error) {
@@ -152,17 +169,17 @@ const DispatcherManager = () => {
 
   const handleInputChange = (field, value) => {
     let processedValue = value;
-    
+
     // Format phone number as user types
     if (field === 'phoneNumber') {
       processedValue = formatPhoneNumber(value);
     }
-    
+
     setFormData(prev => ({
       ...prev,
       [field]: processedValue
     }));
-    
+
     // Clear validation error when user starts typing
     if (validationErrors[field]) {
       setValidationErrors(prev => ({
@@ -174,23 +191,28 @@ const DispatcherManager = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Validate form before submission
     if (!validateForm()) {
       return;
     }
-    
     try {
       if (editingDispatcher) {
-        await adminAPI.dispatchers.update(editingDispatcher.id, formData);
+        await adminAPI.dispatchers.update(formData);
       } else {
-        await adminAPI.dispatchers.create(formData);
+        // Include empty password - server will generate the actual password
+        const response = await adminAPI.dispatchers.create({ ...formData, password: '' });
+
+        // Check if there was a warning (email failed to send)
+        if (response && response.warning) {
+          alert(`Warning: ${response.warning}\n\nTemporary Password: ${response.tempPassword}`);
+        }
       }
-      
+
       // Reload dispatchers and reset form
       await loadDispatchers();
       resetForm();
-      
+
     } catch (error) {
       console.error('Failed to save dispatcher:', error);
       alert('Failed to save dispatcher. Please try again.');
@@ -203,31 +225,18 @@ const DispatcherManager = () => {
       name: dispatcher.name,
       email: dispatcher.email,
       phoneNumber: dispatcher.phoneNumber,
-      password: '',
       isActive: dispatcher.isActive ?? true,
       isAdmin: dispatcher.isAdmin ?? false
     });
     setShowAddForm(true);
   };
 
-  const handleDelete = async (dispatcher) => {
-    if (window.confirm(`Are you sure you want to delete ${dispatcher.name}?`)) {
-      try {
-        await adminAPI.dispatchers.delete(dispatcher.id);
-        await loadDispatchers();
-      } catch (error) {
-        console.error('Failed to delete dispatcher:', error);
-        alert('Failed to delete dispatcher. Please try again.');
-      }
-    }
-  };
 
   const resetForm = () => {
     setFormData({
       name: '',
       email: '',
       phoneNumber: '',
-      password: '',
       isActive: true,
       isAdmin: false
     });
@@ -237,160 +246,176 @@ const DispatcherManager = () => {
   };
 
   if (loading) {
-    return <div className="loading">Loading dispatchers...</div>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+        <CircularProgress />
+        <Typography variant="h6" sx={{ ml: 2 }}>Loading dispatchers...</Typography>
+      </Box>
+    );
   }
 
   return (
-    <div className="dispatcher-manager">
-      <div className="manager-header">
-        <div className="search-section">
-          <input
-            type="text"
-            placeholder="Search dispatchers by name, email, or phone..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input"
-          />
-          <button 
-            onClick={() => setShowAddForm(true)} 
-            className="add-btn"
-          >
-            + Add Dispatcher
-          </button>
-        </div>
-      </div>
+    <Box>
+      <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="Search dispatchers by name, email, or phone..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          sx={{ minWidth: '300px', flexGrow: 1 }}
+        />
+        <Button
+          onClick={() => setShowAddForm(true)}
+          variant="contained"
+          color="success"
+          startIcon={<AddIcon />}
+          sx={{ whiteSpace: 'nowrap' }}
+        >
+          Add Dispatcher
+        </Button>
+      </Box>
 
-      {showAddForm && (
-        <div className="form-overlay">
-          <div className="form-modal">
-            <div className="form-header">
-              <h3>{editingDispatcher ? 'Edit Dispatcher' : 'Add New Dispatcher'}</h3>
-              <button onClick={resetForm} className="close-btn">×</button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="dispatcher-form">
-              <div className="form-group">
-                <label>Name *</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => handleInputChange('name', e.target.value)}
-                  className={validationErrors.name ? 'error' : ''}
-                  required
-                />
-                {validationErrors.name && <span className="error-message">{validationErrors.name}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>Email *</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => handleInputChange('email', e.target.value)}
-                  className={validationErrors.email ? 'error' : ''}
-                  required
-                />
-                {validationErrors.email && <span className="error-message">{validationErrors.email}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>Phone *</label>
-                <input
-                  type="tel"
-                  value={formData.phoneNumber}
-                  onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
-                  className={validationErrors.phoneNumber ? 'error' : ''}
-                  placeholder="(555) 123-4567"
-                  maxLength="14"
-                  required
-                />
-                {validationErrors.phoneNumber && <span className="error-message">{validationErrors.phoneNumber}</span>}
-              </div>
-              
-              <div className="form-group">
-                <label>Password *</label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => handleInputChange('password', e.target.value)}
-                  className={validationErrors.password ? 'error' : ''}
-                  required={!editingDispatcher}
-                  placeholder={editingDispatcher ? 'Leave blank to keep current password' : ''}
-                />
-                {validationErrors.password && <span className="error-message">{validationErrors.password}</span>}
-              </div>
-              
-              <div className="checkbox-row">
-                <div className="checkbox-group">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={formData.isActive}
-                      onChange={(e) => handleInputChange('isActive', e.target.checked)}
-                    />
-                    <span className="checkmark"></span>
-                    Active
-                  </label>
-                </div>
-                
-                <div className="checkbox-group">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={formData.isAdmin}
-                      onChange={(e) => handleInputChange('isAdmin', e.target.checked)}
-                    />
-                    <span className="checkmark"></span>
-                    Admin
-                  </label>
-                </div>
-              </div>
-              
-              <div className="form-actions">
-                <button type="button" onClick={resetForm} className="cancel-btn">
-                  Cancel
-                </button>
-                <button type="submit" className="save-btn">
-                  {editingDispatcher ? 'Update' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <Dialog open={showAddForm} onClose={resetForm} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              {editingDispatcher ? 'Edit Dispatcher' : 'Add New Dispatcher'}
+            </Typography>
+            <IconButton onClick={resetForm}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
 
-      <div className="dispatchers-list">
+        <DialogContent>
+          <Box component="form" onSubmit={handleSubmit} sx={{ pt: 2 }}>
+            <TextField
+              fullWidth
+              label="Name"
+              value={formData.name}
+              onChange={(e) => handleInputChange('name', e.target.value)}
+              error={!!validationErrors.name}
+              helperText={validationErrors.name}
+              margin="normal"
+              required
+            />
+
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => handleInputChange('email', e.target.value)}
+              error={!!validationErrors.email}
+              helperText={validationErrors.email}
+              margin="normal"
+              required
+            />
+
+            <TextField
+              fullWidth
+              label="Phone"
+              type="tel"
+              value={formData.phoneNumber}
+              onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+              error={!!validationErrors.phoneNumber}
+              helperText={validationErrors.phoneNumber}
+              placeholder="(555) 123-4567"
+              inputProps={{ maxLength: 14 }}
+              margin="normal"
+              required
+            />
+            <Box sx={{ mt: 2, display: 'flex', gap: 3 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.isActive}
+                    onChange={(e) => handleInputChange('isActive', e.target.checked)}
+                  />
+                }
+                label="Active"
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.isAdmin}
+                    onChange={(e) => handleInputChange('isAdmin', e.target.checked)}
+                  />
+                }
+                label="Admin"
+              />
+            </Box>
+          </Box>
+        </DialogContent>
+
+        <DialogActions>
+          <Button onClick={resetForm} color="secondary">
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} variant="contained" color="primary">
+            {editingDispatcher ? 'Update' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Box sx={{ mt: 3 }}>
         {!Array.isArray(filteredDispatchers) || filteredDispatchers.length === 0 ? (
-          <div className="empty-state">
-            <p>No dispatchers found.</p>
-          </div>
+          <Box textAlign="center" py={5}>
+            <Typography variant="h6" color="text.secondary">
+              No dispatchers found.
+            </Typography>
+          </Box>
         ) : (
-          <div className="dispatchers-grid">
-            {/* {console.log(dispatchers)} */}
-            {filteredDispatchers.map(dispatcher => (   
-                           console.log(dispatcher),
-
-              <div key={dispatcher.id} className="dispatcher-card">
-                <div className="dispatcher-info">
-                  <h4>{dispatcher.name}</h4>
-                  <p><strong>Email:</strong> {dispatcher.email}</p>
-                  <p><strong>Phone:</strong> {dispatcher.phoneNumber}</p>
-                  <p><strong>Joined:</strong> {formatDate(dispatcher.dateJoined || dispatcher.DateJoined)}</p>
-                </div>
-                <div className="dispatcher-actions">
-                  <button onClick={() => handleEdit(dispatcher)} className="edit-btn">
-                    Edit
-                  </button>
-                  {/* <button onClick={() => handleDelete(dispatcher)} className="delete-btn">
-                    Delete
-                  </button> */}
-                </div>
-              </div>
-            ))}
-          </div>
+          <Grid container spacing={3}>
+            {filteredDispatchers.map(dispatcher => {
+              return (
+                <Grid item xs={12} sm={6} lg={4} key={dispatcher.id}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <CardContent sx={{ flexGrow: 1 }}>
+                      <Typography variant="h6" component="h4" gutterBottom>
+                        {dispatcher.name}
+                      </Typography>
+                      <Box display="flex" alignItems="center" gap={1} mb={1}>
+                        <EmailIcon fontSize="small" color="action" />
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          <strong>Email:</strong> {dispatcher.email}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={1} mb={1}>
+                        <PhoneIcon fontSize="small" color="action" />
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          <strong>Phone:</strong> {dispatcher.phoneNumber}
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        <strong>Joined:</strong> {formatDate(dispatcher.dateJoined || dispatcher.DateJoined)}
+                      </Typography>
+                      <Box sx={{ mt: 1 }}>
+                        {dispatcher.isAdmin && <Chip label="Admin" color="error" size="small" sx={{ mr: 1 }} />}
+                        {dispatcher.isActive && <Chip label="Active" color="primary" size="small" />}
+                      </Box>
+                    </CardContent>
+                    <CardActions>
+                      <Button
+                        onClick={() => handleEdit(dispatcher)}
+                        startIcon={<EditIcon />}
+                        color="warning"
+                        variant="outlined"
+                        size="small"
+                      >
+                        Edit
+                      </Button>
+                    </CardActions>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 };
 

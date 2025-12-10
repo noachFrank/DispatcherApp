@@ -1,9 +1,62 @@
-import { useState } from 'react';
-import { callsAPI } from '../services/apiService';
-import { ridesAPI, buildNewRideData, handleCreditCardStorage } from '../services/dashboardService';
-import './NewCallWizard.css';
+import { useState, useEffect, useRef } from 'react';
+import {
+  Box,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
+  FormControl,
+  FormLabel,
+  Checkbox,
+  Grid,
+  IconButton,
+  Card,
+  CardContent,
+  Divider,
+  Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Select,
+  MenuItem,
+  InputLabel,
+  Autocomplete,
+  CircularProgress
+} from '@mui/material';
+import {
+  Add as AddIcon,
+  Remove as RemoveIcon,
+  Close as CloseIcon,
+  Schedule as ScheduleIcon,
+  Send as SendIcon
+} from '@mui/icons-material';
+import { useAuth } from '../contexts/AuthContext';
+import signalRService from '../services/signalRService';
+import { creditCardStorage } from '../utils/creditCardStorage';
+import { driversAPI } from '../services/apiService';
+import AddressAutocomplete from './AddressAutocomplete';
+import { calculateRoute } from '../services/routeCalculator';
+import { useGoogleMaps } from './GoogleMapsProvider';
+
+// Car type options matching the C# CarType enum
+const CAR_TYPES = [
+  { value: 0, label: 'Car' },
+  { value: 1, label: 'SUV' },
+  { value: 2, label: 'MiniVan' },
+  { value: 3, label: '12 Passenger' },
+  { value: 4, label: '15 Passenger' },
+  { value: 5, label: 'Luxury SUV' }
+];
+
 
 const NewCallWizard = ({ onComplete, onCancel }) => {
+  const { user, signalRConnection } = useAuth();
+  const { isLoaded: googleMapsLoaded } = useGoogleMaps();
+  const [drivers, setDrivers] = useState([]);
   const [formData, setFormData] = useState({
     // Ride object fields
     customerName: '',
@@ -11,13 +64,18 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     cost: 0,
     notes: '',
     paymentType: 'cash',
-    
+    passengers: 1,
+    carType: 0,
+    assignedToId: null,
+    assignedToName: '',
+
     // Route object fields
     pickup: '',
     dropOff: '',
     additionalStops: [],
     roundTrip: false,
-    
+    estimatedDuration: 0, // in minutes
+
     // Credit card info (for payment processing)
     ccNumber: '',
     expiryDate: '',
@@ -30,12 +88,32 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [routeInfo, setRouteInfo] = useState({ distance: '', duration: '' });
+  // Track if addresses were selected from autocomplete (not just typed)
+  const [addressesValidated, setAddressesValidated] = useState({ pickup: false, dropOff: false });
+  // Track which stop indices have been validated (selected from autocomplete)
+  const [stopsValidated, setStopsValidated] = useState([]);
+  const scheduleRef = useRef(null);
+
+  // Fetch all drivers on component mount
+  useEffect(() => {
+    const fetchDrivers = async () => {
+      try {
+        const data = await driversAPI.getAll();
+        setDrivers(data || []);
+      } catch (error) {
+        console.error('Error fetching drivers:', error);
+      }
+    };
+    fetchDrivers();
+  }, []);
 
   // Phone number formatting
   const formatPhoneNumber = (value) => {
     // Remove all non-digits
     const phoneNumber = value.replace(/\D/g, '');
-    
+
     // Format as (XXX) XXX-XXXX
     if (phoneNumber.length >= 6) {
       return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
@@ -48,17 +126,17 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
 
   const handleInputChange = (field, value) => {
     let processedValue = value;
-    
+
     // Format phone number as user types
     if (field === 'customerPhoneNumber') {
       processedValue = formatPhoneNumber(value);
     }
-    
+
     setFormData(prev => ({
       ...prev,
       [field]: processedValue
     }));
-    
+
     // Clear error when user starts typing
     if (errors[field]) {
       setErrors(prev => ({
@@ -66,6 +144,133 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
         [field]: ''
       }));
     }
+
+    // If user is typing in address fields, mark as not validated
+    // (they need to select from autocomplete to validate)
+    if (field === 'dropOff' || field === 'pickup') {
+      setAddressesValidated(prev => ({
+        ...prev,
+        [field]: false
+      }));
+    }
+  };
+
+  // Calculate route when pickup, dropoff, stops, or roundTrip changes
+  const calculateTripRoute = async () => {
+    // Only calculate if both addresses were selected from autocomplete
+    if (!googleMapsLoaded || !formData.pickup || !formData.dropOff) {
+      setRouteInfo({ distance: '', duration: '' });
+      setFormData(prev => ({ ...prev, estimatedDuration: 0, cost: 0 }));
+      return;
+    }
+
+    // Only calculate if both addresses are validated (selected from autocomplete)
+    if (!addressesValidated.pickup || !addressesValidated.dropOff) {
+      return;
+    }
+
+    setIsCalculatingRoute(true);
+    try {
+      // Only include stops that have been validated (selected from autocomplete)
+      const validatedStops = formData.additionalStops.filter((s, index) =>
+        s && s.trim() !== '' && stopsValidated.includes(index)
+      );
+
+      const result = await calculateRoute(
+        formData.pickup,
+        formData.dropOff,
+        validatedStops,
+        formData.roundTrip
+      );
+
+      if (result.error) {
+        // Silently handle errors - don't log to console for expected cases
+        setRouteInfo({ distance: '', duration: '' });
+      } else {
+        setRouteInfo({
+          distance: result.distanceText,
+          duration: result.durationText
+        });
+
+        // Update estimated duration and calculate cost based on distance
+        const estimatedCost = Math.round(result.distance * 2.5); // $2.50 per mile
+        setFormData(prev => ({
+          ...prev,
+          estimatedDuration: result.duration,
+          cost: Math.max(10, estimatedCost) // Minimum $10
+        }));
+      }
+    } catch (error) {
+      // Silently handle errors
+      setRouteInfo({ distance: '', duration: '' });
+    } finally {
+      setIsCalculatingRoute(false);
+    }
+  };
+
+  // Trigger route calculation when addresses change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (formData.pickup && formData.dropOff && addressesValidated.pickup && addressesValidated.dropOff) {
+        calculateTripRoute();
+      }
+    }, 500); // Debounce for 500ms
+
+    return () => clearTimeout(timer);
+  }, [formData.pickup, formData.dropOff, formData.additionalStops, formData.roundTrip, googleMapsLoaded, addressesValidated, stopsValidated]);
+
+  // Handle address selection from autocomplete
+  const handleAddressSelect = (field, address, placeDetails) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: address
+    }));
+
+    // Mark this address as validated (selected from autocomplete)
+    setAddressesValidated(prev => ({
+      ...prev,
+      [field]: true
+    }));
+
+    // Clear error when address is selected
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  // Handle stop address selection
+  const handleStopSelect = (index, address, placeDetails) => {
+    const newStops = [...formData.additionalStops];
+    newStops[index] = address;
+    setFormData(prev => ({
+      ...prev,
+      additionalStops: newStops
+    }));
+
+    // Mark this stop as validated
+    setStopsValidated(prev => {
+      if (!prev.includes(index)) {
+        return [...prev, index];
+      }
+      return prev;
+    });
+  };
+
+  const setPrice = () => {
+    // Placeholder logic for setting price based on pickup/drop-off
+    // In a real implementation, you would calculate distance and set price accordingly
+    if (!formData.pickup || !formData.dropOff) {
+      setFormData(prev => ({
+        ...prev,
+        ['cost']: 0
+      }));
+      return;
+    }
+    setFormData(prev => ({
+      ...prev,
+      ['cost']: 10
+    }));
+
   };
 
   const addStop = () => {
@@ -82,6 +287,13 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       ...prev,
       additionalStops: newStops
     }));
+
+    // Adjust stopsValidated: remove this index and decrement indices above it
+    setStopsValidated(prev =>
+      prev
+        .filter(i => i !== index)
+        .map(i => i > index ? i - 1 : i)
+    );
   };
 
   const updateStop = (index, value) => {
@@ -91,11 +303,14 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       ...prev,
       additionalStops: newStops
     }));
+
+    // When manually typed, invalidate this stop
+    setStopsValidated(prev => prev.filter(i => i !== index));
   };
 
   const validateForm = () => {
     const newErrors = {};
-    console.log(formData.customerPhoneNumber);
+    //console.log(formData.customerPhoneNumber);
     if (!formData.customerPhoneNumber.trim()) {
       newErrors.customerPhoneNumber = 'Phone number is required';
     } else {
@@ -105,16 +320,21 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
         newErrors.customerPhoneNumber = 'Phone number must be 10 digits';
       }
     }
-    
+
     if (!formData.pickup.trim()) {
       newErrors.pickup = 'Pickup location is required';
     }
-    
+
     if (!formData.dropOff.trim()) {
       newErrors.dropOff = 'Drop-off location is required';
     }
 
-    if (formData.paymentType === 'creditCard') {
+    // Validate passengers (required, must be at least 1)
+    if (!formData.passengers || formData.passengers < 1) {
+      newErrors.passengers = 'At least 1 passenger is required';
+    }
+
+    if (formData.paymentType === 'dispatcherCC') {
       if (!formData.ccNumber.trim()) {
         newErrors.ccNumber = 'Credit card number is required';
       }
@@ -130,50 +350,84 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     }
 
     setErrors(newErrors);
-    console.log("validating form...", newErrors);
+    //console.log("validating form...", newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  // Build new ride object matching exact C# API structure
   const buildNewRideObject = () => {
-    const currentTime = new Date().toISOString();
-    const pickupTime = scheduledDate && scheduledTime ? 
-      new Date(`${scheduledDate}T${scheduledTime}`).toISOString() : null;
+    const now = new Date();
+    const currentTime = now.toISOString();
+    let scheduledFor = currentTime;
+    if (scheduledDate && scheduledTime) {
+      const localScheduledDate = new Date(`${scheduledDate}T${scheduledTime}`);
+      scheduledFor = localScheduledDate.toISOString();
+    }
 
-    const newRideObject = {
-      ride: {
-        customerName: formData.customerName,
-        customerPhoneNumber: formData.customerPhoneNumber.replace(/\D/g, ''), // Store digits only
-        callTime: currentTime,
-        pickupTime: pickupTime,
-        dropOffTime: null,
-        cost: parseInt(formData.cost) || 0,
-        driversCompensation: null,
-        paidTime: null,
-        assignedToId: null,
-        reassignedToId: null,
-        notes: formData.notes || "",
-        dispatchedById: null,
-        paymentType: formData.paymentType
-      },
+    // Convert estimatedDuration (minutes) to TimeOnly format (HH:mm:ss)
+    const durationMinutes = formData.estimatedDuration || 0;
+    const hours = Math.floor(durationMinutes / 60);
+    const minutes = Math.floor(durationMinutes % 60);
+    const estimatedDurationTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+
+    // Build a Ride object that matches the C# Ride class structure
+    const rideObject = {
+      rideId: 0,
+      routeId: 0,
+      customerName: formData.customerName,
+      customerPhoneNumber: formData.customerPhoneNumber.replace(/\D/g, ''),
+      callTime: currentTime,
+      scheduledFor: scheduledFor,
+      pickupTime: null,
+      dropOffTime: null,
+      cost: parseInt(formData.cost) || 0,
+      driversCompensation: formData.cost > 0 ? Math.round((parseInt(formData.cost)) * 0.6) : 0,
+      paidTime: null,
+      assignedToId: formData.assignedToId || null,
+      reassignedToId: null,
+      notes: formData.notes || "",
+      dispatchedById: user?.userId || null,
+      paymentType: formData.paymentType,
+      reassigned: false,
+      canceled: false,
+      passengers: parseInt(formData.passengers) || 1,
+      carType: parseInt(formData.carType) || 0,
+      estimatedDuration: estimatedDurationTime,
       route: {
+        routeId: 0,
         pickup: formData.pickup,
         dropOff: formData.dropOff,
         stop1: formData.additionalStops[0] || null,
         stop2: formData.additionalStops[1] || null,
         stop3: formData.additionalStops[2] || null,
         stop4: formData.additionalStops[3] || null,
+        stop5: formData.additionalStops[4] || null,
+        stop6: formData.additionalStops[5] || null,
+        stop7: formData.additionalStops[6] || null,
+        stop8: formData.additionalStops[7] || null,
+        stop9: formData.additionalStops[8] || null,
+        stop10: formData.additionalStops[9] || null,
         roundTrip: formData.roundTrip,
-        callTime: currentTime,
-        rideId: 0 // Will be set by API
+        callTime: currentTime
       }
     };
 
-    return newRideObject;
+    return rideObject;
+  };
+
+  const handleCreditCardStorage = (formData) => {
+    if (formData.paymentType === 'dispatcherCC') {
+      const ccDetails = {
+        ccNumber: formData.ccNumber,
+        expiryDate: formData.expiryDate,
+        cvv: formData.cvv,
+        zipCode: formData.zipCode
+      };
+      return creditCardStorage.save(ccDetails);
+    }
+    return null;
   };
 
   const handleSubmit = async () => {
-    console.log("validating form...");
     if (!validateForm()) return;
 
     setIsSubmitting(true);
@@ -184,19 +438,23 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
         console.log('Credit card details saved locally with key:', ccStorageKey);
       }
 
-      // Build NewRide data structure according to C# API schema
       const newRideData = buildNewRideObject();
-      
-      //console.log('Creating ride with data:', newRideData);
-      const result = await ridesAPI.create(newRideData);
-      //console.log('Ride created successfully:', result);
 
-      // Call onComplete with the result
-      onComplete(result);
-      
-      // Reset form
+      try {
+        if (signalRConnection) {
+          console.log('Broadcasting new call via SignalR...');
+          await signalRConnection.invoke("NewCallCreated", newRideData);
+        } else {
+          console.warn('SignalR not connected, call created but not broadcasted in real-time');
+        }
+      } catch (signalError) {
+        console.error('Failed to broadcast call via SignalR:', signalError);
+      }
+
+      onComplete(newRideData);
+
       clearForm();
-      
+
       alert('Call sent!');
     } catch (error) {
       console.error('Failed to create ride:', error);
@@ -209,6 +467,10 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
   const handleScheduleClick = () => {
     if (!validateForm()) return;
     setShowDatePicker(true);
+    // Scroll to schedule section after it renders
+    setTimeout(() => {
+      scheduleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   };
 
   const handleScheduleSubmit = async () => {
@@ -216,40 +478,11 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       alert('Please select both date and time for scheduling');
       return;
     }
-
-    setIsSubmitting(true);
-    try {
-      const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
-      
-      // Handle credit card storage if CC payment
-      const ccStorageKey = handleCreditCardStorage(formData);
-      if (ccStorageKey) {
-        console.log('Credit card details saved locally with key:', ccStorageKey);
-      }
-
-      // Build NewRide data structure with scheduled pickup time
-      const newRideData = buildNewRideObject();
-      newRideData.ride.callTime = scheduledDateTime.toISOString();
-      console.log('Creating scheduled ride with data:', newRideData);
-      const result = await ridesAPI.create(newRideData);
-      console.log('Ride scheduled successfully:', result);
-
-      // Call onComplete with the result
-      onComplete(result);
-      
-      // Reset form and schedule picker
-      clearForm();
-      setShowDatePicker(false);
-      setScheduledDate('');
-      setScheduledTime('');
-      
-      alert('Call scheduled!');
-    } catch (error) {
-      console.error('Failed to schedule ride:', error);
-      alert('Failed to schedule ride. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    await handleSubmit();
+    // Clear schedule fields and hide the schedule section
+    setScheduledDate('');
+    setScheduledTime('');
+    setShowDatePicker(false);
   };
 
   const clearForm = () => {
@@ -260,6 +493,10 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       cost: 0,
       notes: '',
       paymentType: 'cash',
+      passengers: 1,
+      carType: 0,
+      assignedToId: null,
+      assignedToName: '',
       pickup: '',
       dropOff: '',
       roundTrip: false,
@@ -272,6 +509,10 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       zipCode: ''
     });
     setErrors({});
+    // Reset trip estimate and validation states
+    setRouteInfo({ distance: '', duration: '' });
+    setAddressesValidated({ pickup: false, dropOff: false });
+    setStopsValidated([]);
   };
 
   const getTomorrowDate = () => {
@@ -281,325 +522,440 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
   };
 
   return (
-    <div className="new-call-form">
-      <div className="form-header">
-        <h2>New Call Request</h2>
-        <button onClick={onCancel} className="cancel-btn">
-          ×
-        </button>
-      </div>
-      
-      <div className="form-content">
-        {/* Left Side - Call Details */}
-        <div className="call-details-section">
-          <h3>Call Details</h3>
-          
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="customerName">Customer Name</label>
-              <input
-                type="text"
-                id="customerName"
-                value={formData.customerName}
-                onChange={(e) => handleInputChange('customerName', e.target.value)}
-                className={errors.customerName ? 'error' : ''}
-                placeholder="Enter customer name (optional)"
-              />
-              {errors.customerName && <span className="error-text">{errors.customerName}</span>}
-            </div>
-            
-            <div className="form-group">
-              <label htmlFor="customerPhoneNumber">Customer Number *</label>
-              <input
-                type="tel"
-                id="customerPhoneNumber"
-                value={formData.customerPhoneNumber}
-                onChange={(e) => handleInputChange('customerPhoneNumber', e.target.value)}
-                className={errors.customerPhoneNumber ? 'error' : ''}
-                placeholder="(555) 123-4567"
-                maxLength="14"
-              />
-              {errors.customerPhoneNumber && <span className="error-text">{errors.customerPhoneNumber}</span>}
-            </div>
-          </div>
+    <Dialog open={true} onClose={onCancel} maxWidth="lg" fullWidth>
+      <DialogTitle>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Typography variant="h5">New Call Request</Typography>
+          <IconButton onClick={onCancel}>
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </DialogTitle>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="pickup">Pickup Location *</label>
-              <input
-                type="text"
-                id="pickup"
-                value={formData.pickup}
-                onChange={(e) => handleInputChange('pickup', e.target.value)}
-                className={errors.pickup ? 'error' : ''}
-                placeholder="Enter pickup address"
-              />
-              {errors.pickup && <span className="error-text">{errors.pickup}</span>}
-            </div>
-            
-            <div className="form-group">
-              <label htmlFor="dropOff">Drop-off Location *</label>
-              <input
-                type="text"
-                id="dropOff"
-                value={formData.dropOff}
-                onChange={(e) => handleInputChange('dropOff', e.target.value)}
-                className={errors.dropOff ? 'error' : ''}
-                placeholder="Enter drop-off address"
-              />
-              {errors.dropOff && <span className="error-text">{errors.dropOff}</span>}
-            </div>
-          </div>
+      <DialogContent>
+        <Grid container spacing={3} sx={{ mt: 1 }}>
+          {/* Left Side - Call Details */}
+          <Grid item xs={12} md={7}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Call Details
+                </Typography>
 
-          <div className="form-row">
-            <div className="checkbox-group">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={formData.roundTrip}
-                  onChange={(e) => handleInputChange('roundTrip', e.target.checked)}
-                />
-                <span className="checkmark"></span>
-                Round Trip
-              </label>
-            </div>
-          </div>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Customer Name"
+                      value={formData.customerName}
+                      onChange={(e) => handleInputChange('customerName', e.target.value)}
+                      error={!!errors.customerName}
+                      helperText={errors.customerName}
+                      placeholder="Enter customer name (optional)"
+                      margin="normal"
+                    />
+                  </Grid>
 
-          {/* Additional Stops */}
-          <div className="additional-stops-section">
-            <div className="stops-header">
-              <label>Additional Stops</label>
-              <button type="button" onClick={addStop} className="add-stop-btn">
-                + Add Stop
-              </button>
-            </div>
-            
-            {Array.isArray(formData.additionalStops) && formData.additionalStops.map((stop, index) => (
-              <div key={index} className="stop-input-group">
-                <input
-                  type="text"
-                  value={stop}
-                  onChange={(e) => updateStop(index, e.target.value)}
-                  placeholder={`Stop ${index + 1} address`}
-                  className="stop-input"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeStop(index)}
-                  className="remove-stop-btn"
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Customer Number"
+                      type="tel"
+                      value={formData.customerPhoneNumber}
+                      onChange={(e) => handleInputChange('customerPhoneNumber', e.target.value)}
+                      error={!!errors.customerPhoneNumber}
+                      helperText={errors.customerPhoneNumber}
+                      placeholder="(555) 123-4567"
+                      inputProps={{ maxLength: 14 }}
+                      margin="normal"
+                      required
+                    />
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <AddressAutocomplete
+                      label="Pickup Location"
+                      value={formData.pickup}
+                      onChange={(address, placeDetails) => handleAddressSelect('pickup', address, placeDetails)}
+                      onInputChange={(value) => handleInputChange('pickup', value)}
+                      error={!!errors.pickup}
+                      helperText={errors.pickup}
+                      placeholder="Enter pickup address"
+                      required
+                    />
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <AddressAutocomplete
+                      label="Drop-off Location"
+                      value={formData.dropOff}
+                      onChange={(address, placeDetails) => handleAddressSelect('dropOff', address, placeDetails)}
+                      onInputChange={(value) => handleInputChange('dropOff', value)}
+                      error={!!errors.dropOff}
+                      helperText={errors.dropOff}
+                      placeholder="Enter drop-off address"
+                      required
+                    />
+                  </Grid>
+
+                  {/* Passengers */}
+                  <Grid item xs={12} sm={3}>
+                    <TextField
+                      fullWidth
+                      label="Passengers"
+                      type="number"
+                      value={formData.passengers}
+                      onChange={(e) => handleInputChange('passengers', parseInt(e.target.value) || 1)}
+                      error={!!errors.passengers}
+                      helperText={errors.passengers}
+                      inputProps={{ min: 1 }}
+                      InputLabelProps={{ shrink: true }}
+                      margin="normal"
+                      required
+                    />
+                  </Grid>
+
+                  {/* Car Type */}
+                  <Grid item xs={12} sm={3}>
+                    <FormControl fullWidth margin="normal" required>
+                      <InputLabel shrink>Car Type</InputLabel>
+                      <Select
+                        value={formData.carType}
+                        label="Car Type"
+                        displayEmpty
+                        notched
+                        onChange={(e) => handleInputChange('carType', e.target.value)}
+                      >
+                        {CAR_TYPES.map((type) => (
+                          <MenuItem key={type.value} value={type.value}>
+                            {type.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+
+                  {/* Assigned To Driver */}
+                  <Grid item xs={12} sm={6}>
+                    <Autocomplete
+                      options={drivers}
+                      getOptionLabel={(option) => option.name || ''}
+                      value={drivers.find(d => d.id === formData.assignedToId) || null}
+                      onChange={(e, newValue) => {
+                        handleInputChange('assignedToId', newValue?.id || null);
+                        handleInputChange('assignedToName', newValue?.name || '');
+                      }}
+                      sx={{ minWidth: 200 }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Assign to Driver"
+                          placeholder="Search drivers..."
+                          margin="normal"
+                          InputLabelProps={{ shrink: true }}
+                          sx={{ '& .MuiInputBase-root': { minWidth: 180 } }}
+                        />
+                      )}
+                      isOptionEqualToValue={(option, value) => option.id === value?.id}
+                    />
+                  </Grid>
+
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={formData.roundTrip}
+                          onChange={(e) => handleInputChange('roundTrip', e.target.checked)}
+                        />
+                      }
+                      label="Round Trip"
+                    />
+                  </Grid>
+                </Grid>
+
+                {/* Additional Stops */}
+                <Box sx={{ mt: 2 }}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                    <Typography variant="subtitle2">Additional Stops</Typography>
+                    <Button
+                      size="small"
+                      startIcon={<AddIcon />}
+                      onClick={addStop}
+                      variant="outlined"
+                    >
+                      Add Stop
+                    </Button>
+                  </Box>
+
+                  {Array.isArray(formData.additionalStops) && formData.additionalStops.map((stop, index) => (
+                    <Box key={index} display="flex" alignItems="flex-start" gap={1} mb={1}>
+                      <Box sx={{ flex: 1 }}>
+                        <AddressAutocomplete
+                          label={`Stop ${index + 1}`}
+                          value={stop}
+                          onChange={(address, placeDetails) => handleStopSelect(index, address, placeDetails)}
+                          onInputChange={(value) => updateStop(index, value)}
+                          placeholder={`Stop ${index + 1} address`}
+                          size="small"
+                          margin="none"
+                        />
+                      </Box>
+                      <IconButton
+                        size="small"
+                        onClick={() => removeStop(index)}
+                        color="error"
+                        sx={{ mt: 1 }}
+                      >
+                        <RemoveIcon />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
+
+                {/* Route Info and Cost Row */}
+                <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Route Info */}
+                  {(routeInfo.distance || routeInfo.duration || isCalculatingRoute) && (
+                    <Box>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Trip Estimate
+                      </Typography>
+                      {isCalculatingRoute ? (
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <CircularProgress size={16} />
+                          <Typography variant="body2" color="text.secondary">
+                            Calculating...
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Box display="flex" gap={1}>
+                          {routeInfo.distance && (
+                            <Chip
+                              label={routeInfo.distance}
+                              size="small"
+                              variant="outlined"
+                              color="info"
+                            />
+                          )}
+                          {routeInfo.duration && (
+                            <Chip
+                              label={routeInfo.duration}
+                              size="small"
+                              variant="outlined"
+                              color="secondary"
+                            />
+                          )}
+                        </Box>
+                      )}
+                    </Box>
+                  )}
+
+                  <Box>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Estimated Cost
+                    </Typography>
+                    <Chip
+                      label={`$${formData.cost.toFixed(2)}`}
+                      color="primary"
+                      variant="outlined"
+                      size="large"
+                    />
+                  </Box>
+
+                  {/* Notes */}
+                  <TextField
+                    sx={{ flex: 1, minWidth: 200 }}
+                    label="Notes"
+                    multiline
+                    rows={2}
+                    size="small"
+                    value={formData.notes}
+                    onChange={(e) => handleInputChange('notes', e.target.value)}
+                    placeholder="Additional notes..."
+                  />
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Right Side - Payment Info */}
+          <Grid item xs={12} md={5}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Payment Information
+                </Typography>
+
+                <FormControl component="fieldset" sx={{ mt: 2 }}>
+                  <FormLabel component="legend">Payment Method</FormLabel>
+                  <RadioGroup
+                    row
+                    value={formData.paymentType}
+                    onChange={(e) => handleInputChange('paymentType', e.target.value)}
+                    sx={{ mt: 1 }}
+                  >
+                    <FormControlLabel
+                      value="cash"
+                      control={<Radio />}
+                      label="Cash"
+                    />
+                    <FormControlLabel
+                      value="check"
+                      control={<Radio />}
+                      label="Check"
+                    />
+                    <FormControlLabel
+                      value="driverCC"
+                      control={<Radio />}
+                      label="Driver CC"
+                    />
+                    <FormControlLabel
+                      value="dispatcherCC"
+                      control={<Radio />}
+                      label="Dispatcher CC"
+                    />
+                  </RadioGroup>
+                </FormControl>
+
+                {/* Credit Card Fields - Only show for Dispatcher CC */}
+                {formData.paymentType === 'dispatcherCC' && (
+                  <Box sx={{ mt: 3 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Credit Card Information
+                    </Typography>
+
+                    <TextField
+                      fullWidth
+                      label="Card Number *"
+                      value={formData.ccNumber}
+                      onChange={(e) => handleInputChange('ccNumber', e.target.value)}
+                      error={!!errors.ccNumber}
+                      helperText={errors.ccNumber}
+                      placeholder="1234 5678 9012 3456"
+                      margin="normal"
+                      required
+                    />
+
+                    <Grid container spacing={2} sx={{ mt: 1 }}>
+                      <Grid item xs={4}>
+                        <TextField
+                          fullWidth
+                          label="Expiry Date *"
+                          value={formData.expiryDate}
+                          onChange={(e) => handleInputChange('expiryDate', e.target.value)}
+                          error={!!errors.expiryDate}
+                          helperText={errors.expiryDate}
+                          placeholder="MM/YY"
+                          required
+                        />
+                      </Grid>
+
+                      <Grid item xs={4}>
+                        <TextField
+                          fullWidth
+                          label="CVV *"
+                          value={formData.cvv}
+                          onChange={(e) => handleInputChange('cvv', e.target.value)}
+                          error={!!errors.cvv}
+                          helperText={errors.cvv}
+                          placeholder="123"
+                          required
+                        />
+                      </Grid>
+
+                      <Grid item xs={4}>
+                        <TextField
+                          fullWidth
+                          label="Zip Code *"
+                          value={formData.zipCode}
+                          onChange={(e) => handleInputChange('zipCode', e.target.value)}
+                          error={!!errors.zipCode}
+                          helperText={errors.zipCode}
+                          placeholder="12345"
+                          required
+                        />
+                      </Grid>
+                    </Grid>
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+
+        {/* Schedule Date/Time Picker */}
+        {showDatePicker && (
+          <Card ref={scheduleRef} sx={{ mt: 2 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Schedule Call
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Date"
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    inputProps={{ min: getTomorrowDate() }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Time"
+                    type="time"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+              </Grid>
+              <Box sx={{ mt: 2, display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                <Button
+                  onClick={() => setShowDatePicker(false)}
+                  color="secondary"
                 >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* Cost */}
-          <div className="form-group">
-            <label>Estimated Cost</label>
-            <div className="cost-display">
-              ${formData.cost.toFixed(2)}
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div className="form-group">
-            <label htmlFor="notes">Notes</label>
-            <textarea
-              id="notes"
-              value={formData.notes}
-              onChange={(e) => handleInputChange('notes', e.target.value)}
-              placeholder="Add any additional notes for this ride..."
-              rows={3}
-            />
-          </div>
-        </div>
-
-        {/* Right Side - Payment Info */}
-        <div className="payment-section">
-          <h3>Payment Information</h3>
-          
-          <div className="payment-type-section">
-            <label className="section-label">Payment Method</label>
-            <div className="payment-options">
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="paymentType"
-                  value="cash"
-                  checked={formData.paymentType === 'cash'}
-                  onChange={(e) => handleInputChange('paymentType', e.target.value)}
-                />
-                <span className="radio-button"></span>
-                Cash
-              </label>
-              
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="paymentType"
-                  value="check"
-                  checked={formData.paymentType === 'check'}
-                  onChange={(e) => handleInputChange('paymentType', e.target.value)}
-                />
-                <span className="radio-button"></span>
-                Check
-              </label>
-              
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="paymentType"
-                  value="creditCard"
-                  checked={formData.paymentType === 'creditCard'}
-                  onChange={(e) => handleInputChange('paymentType', e.target.value)}
-                />
-                <span className="radio-button"></span>
-                Credit Card
-              </label>
-              
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="paymentType"
-                  value="voucher"
-                  checked={formData.paymentType === 'voucher'}
-                  onChange={(e) => handleInputChange('paymentType', e.target.value)}
-                />
-                <span className="radio-button"></span>
-                Voucher
-              </label>
-            </div>
-          </div>
-
-          {/* Credit Card Fields */}
-          {formData.paymentType === 'creditCard' && (
-            <div className="credit-card-section">
-              <h4>Credit Card Information</h4>
-              
-              <div className="form-group full-width">
-                <label htmlFor="ccNumber">Card Number *</label>
-                <input
-                  type="text"
-                  id="ccNumber"
-                  value={formData.ccNumber}
-                  onChange={(e) => handleInputChange('ccNumber', e.target.value)}
-                  className={errors.ccNumber ? 'error' : ''}
-                  placeholder="1234 5678 9012 3456"
-                />
-                {errors.ccNumber && <span className="error-text">{errors.ccNumber}</span>}
-              </div>
-              
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="expiryDate">Expiry Date *</label>
-                  <input
-                    type="text"
-                    id="expiryDate"
-                    value={formData.expiryDate}
-                    onChange={(e) => handleInputChange('expiryDate', e.target.value)}
-                    className={errors.expiryDate ? 'error' : ''}
-                    placeholder="MM/YY"
-                  />
-                  {errors.expiryDate && <span className="error-text">{errors.expiryDate}</span>}
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="cvv">CVV *</label>
-                  <input
-                    type="text"
-                    id="cvv"
-                    value={formData.cvv}
-                    onChange={(e) => handleInputChange('cvv', e.target.value)}
-                    className={errors.cvv ? 'error' : ''}
-                    placeholder="123"
-                  />
-                  {errors.cvv && <span className="error-text">{errors.cvv}</span>}
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="zipCode">Zip Code *</label>
-                  <input
-                    type="text"
-                    id="zipCode"
-                    value={formData.zipCode}
-                    onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                    className={errors.zipCode ? 'error' : ''}
-                    placeholder="12345"
-                  />
-                  {errors.zipCode && <span className="error-text">{errors.zipCode}</span>}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Schedule Date/Time Picker */}
-      {showDatePicker && (
-        <div className="schedule-section">
-          <h4>Schedule Call</h4>
-          <div className="datetime-inputs">
-            <div className="form-group">
-              <label htmlFor="scheduledDate">Date:</label>
-              <input
-                type="date"
-                id="scheduledDate"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                min={getTomorrowDate()}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="scheduledTime">Time:</label>
-              <input
-                type="time"
-                id="scheduledTime"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="schedule-actions">
-            <button 
-              type="button" 
-              onClick={() => setShowDatePicker(false)}
-              className="cancel-schedule-btn"
-            >
-              Cancel
-            </button>
-            <button 
-              type="button" 
-              onClick={handleScheduleSubmit}
-              disabled={isSubmitting}
-              className="confirm-schedule-btn"
-            >
-              {isSubmitting ? 'Scheduling...' : 'Confirm Schedule'}
-            </button>
-          </div>
-        </div>
-      )}
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleScheduleSubmit}
+                  disabled={isSubmitting}
+                  variant="contained"
+                  color="primary"
+                >
+                  {isSubmitting ? 'Scheduling...' : 'Confirm Schedule'}
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+        )}
+      </DialogContent>
 
       {/* Bottom Actions */}
-      <div className="form-actions">
-        <button 
-          type="button" 
+      <DialogActions sx={{ p: 3 }}>
+        <Button
           onClick={handleScheduleClick}
           disabled={isSubmitting || showDatePicker}
-          className="schedule-btn"
+          startIcon={<ScheduleIcon />}
+          color="secondary"
+          variant="outlined"
         >
           Schedule Call
-        </button>
-        <button 
-          type="button" 
+        </Button>
+        <Button
           onClick={handleSubmit}
           disabled={isSubmitting || showDatePicker}
-          className="submit-btn"
+          startIcon={<SendIcon />}
+          variant="contained"
+          color="primary"
         >
           {isSubmitting ? 'Submitting...' : 'Submit Now'}
-        </button>
-      </div>
-    </div>
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 };
 
