@@ -7,16 +7,16 @@ import {
   Tab,
   Paper,
   CircularProgress,
-  Alert,
   Container
 } from '@mui/material';
-import { Lock as LockIcon, Person as PersonIcon, DirectionsCar as CarIcon } from '@mui/icons-material';
+import { Lock as LockIcon, Person as PersonIcon, DirectionsCar as CarIcon, PersonOff as PersonOffIcon } from '@mui/icons-material';
 import { adminAPI } from '../services/adminService';
 import { useAuth } from '../contexts/AuthContext';
 import DispatcherManager from './DispatcherManager';
 import DriverManager from './DriverManager';
+import FiredWorkersView from './FiredWorkersView';
 
-const AdminManagement = ({ onNavigateToRideHistory }) => {
+const AdminManagement = ({ onNavigateToRideHistory, openMessagingModal, openMessagingDriverId, onMessagingModalClose, onMarkMessagesRead }) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -25,7 +25,9 @@ const AdminManagement = ({ onNavigateToRideHistory }) => {
   const getTabFromUrl = () => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    return tab === 'drivers' ? 'drivers' : 'dispatchers';
+    if (tab === 'drivers') return 'drivers';
+    if (tab === 'fired') return 'fired';
+    return 'dispatchers';
   };
 
   const [activeTab, setActiveTab] = useState(getTabFromUrl);
@@ -40,13 +42,14 @@ const AdminManagement = ({ onNavigateToRideHistory }) => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'drivers' || tab === 'dispatchers') {
+    if (tab === 'drivers' || tab === 'dispatchers' || tab === 'fired') {
       setActiveTab(tab);
     }
   }, [location.search]);
 
   const handleTabChange = (event, newValue) => {
-    const tab = newValue === 0 ? 'dispatchers' : 'drivers';
+    const tabs = ['dispatchers', 'drivers', 'fired'];
+    const tab = tabs[newValue];
     setActiveTab(tab);
     navigate(`/dashboard/admin?tab=${tab}`, { replace: true });
   };
@@ -119,7 +122,7 @@ const AdminManagement = ({ onNavigateToRideHistory }) => {
           </Box>
 
           <Tabs
-            value={activeTab === 'dispatchers' ? 0 : 1}
+            value={activeTab === 'dispatchers' ? 0 : activeTab === 'drivers' ? 1 : 2}
             onChange={handleTabChange}
             sx={{ borderBottom: 1, borderColor: 'divider' }}
           >
@@ -133,12 +136,18 @@ const AdminManagement = ({ onNavigateToRideHistory }) => {
               label="Drivers & Cars"
               iconPosition="start"
             />
+            <Tab
+              icon={<PersonOffIcon />}
+              label="Fired Workers"
+              iconPosition="start"
+            />
           </Tabs>
         </Box>
 
         <Box sx={{ mt: 3 }}>
           {activeTab === 'dispatchers' && <DispatcherManager />}
-          {activeTab === 'drivers' && <DriverManager onNavigateToRideHistory={onNavigateToRideHistory} />}
+          {activeTab === 'drivers' && <DriverManager onNavigateToRideHistory={onNavigateToRideHistory} openMessagingModal={openMessagingModal} openMessagingDriverId={openMessagingDriverId} onMessagingModalClose={onMessagingModalClose} onMarkMessagesRead={onMarkMessagesRead} />}
+          {activeTab === 'fired' && <FiredWorkersView />}
         </Box>
       </Paper>
     </Container>

@@ -50,25 +50,58 @@ import {
     Send as SendIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
-import { messagesAPI } from '../services/apiService';
+import { useAlert } from '../contexts/AlertContext';
+import { messagesAPI, driversAPI } from '../services/apiService';
+import soundService from '../services/soundService';
 
 const DriverMessagingModal = ({
     isOpen,
     onClose,
     driverId,
-    driverName,
+    driverName: propDriverName,
     rideContext = null,  // { rideId, customerName, customerPhone }
     onNavigateToRideHistory = null  // Callback to navigate to RideHistory with a search query
 }) => {
     const { user, signalRConnection } = useAuth();
+    const { showAlert } = useAlert();
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [firstUnreadIndex, setFirstUnreadIndex] = useState(-1);
+    const [fetchedDriverName, setFetchedDriverName] = useState(null);
     const messagesEndRef = useRef(null);
     const messagesContainerRef = useRef(null);
     const inputRef = useRef(null);
+
+    // Use prop name if available, otherwise use fetched name
+    const driverName = propDriverName || fetchedDriverName;
+
+    /**
+     * Fetch driver name if not provided as prop
+     */
+    useEffect(() => {
+        const fetchDriverName = async () => {
+            if (isOpen && driverId && !propDriverName) {
+                try {
+                    const driver = await driversAPI.getById(driverId);
+                    if (driver?.name) {
+                        setFetchedDriverName(driver.name);
+                    }
+                } catch (error) {
+                    console.error('Error fetching driver name:', error);
+                }
+            }
+        };
+        fetchDriverName();
+    }, [isOpen, driverId, propDriverName]);
+
+    // Clear fetched name when modal closes or driver changes
+    useEffect(() => {
+        if (!isOpen) {
+            setFetchedDriverName(null);
+        }
+    }, [isOpen]);
 
     /**
      * Fetch today's messages when modal opens
@@ -79,13 +112,14 @@ const DriverMessagingModal = ({
 
             // Set up SignalR listener for real-time incoming messages from this driver
             if (signalRConnection) {
-                const handleReceiveMessage = (messageData) => {
+                const handleReceiveMessage = async (messageData) => {
                     console.log('Message received in modal:', messageData);
 
                     // Only add if it's from the driver we're chatting with
                     if (messageData.fromDriverId === driverId || messageData.driverId === driverId) {
+                        const messageId = messageData.messageId || messageData.id || Date.now();
                         const newMsg = {
-                            id: messageData.messageId || messageData.id || Date.now(),
+                            id: messageId,
                             message: messageData.message,
                             driverId: driverId,
                             from: `Driver-${driverId}`,
@@ -95,13 +129,53 @@ const DriverMessagingModal = ({
 
                         setMessages(prev => [...prev, newMsg]);
                         scrollToBottom();
+
+                        // Mark the message as read immediately since modal is open
+                        if (messageId && typeof messageId === 'number') {
+                            try {
+                                await signalRConnection.invoke('MarkMessagesAsRead', [messageId], 'dispatcher');
+                                console.log('Marked incoming message as read via SignalR (modal open):', messageId);
+                            } catch (error) {
+                                console.error('Error marking incoming message as read via SignalR:', error);
+                            }
+                        }
                     }
                 };
 
+                // Listen for read receipts - when driver marks our message as read
+                const handleMessageMarkedAsRead = (data) => {
+                    console.log('📬 Driver marked message as read in modal:', data);
+                    console.log('Looking for message ID:', data.messageId);
+
+                    // Update the message in our local state to mark it as read
+                    setMessages(prev => {
+                        let foundMessage = false;
+                        const updated = prev.map(msg => {
+                            if (msg.id === data.messageId) {
+                                console.log('✅ Found and updating message:', msg.id, msg.message, 'from', msg.from, 'was read:', msg.read);
+                                foundMessage = true;
+                                return { ...msg, read: true };
+                            }
+                            return msg;
+                        });
+
+                        if (!foundMessage) {
+                            console.log('❌ Message ID', data.messageId, 'not found in messages array');
+                            console.log('Available message IDs:', prev.map(m => ({ id: m.id, from: m.from, message: m.message?.substring(0, 30) })));
+                        } else {
+                            console.log('✅ Successfully marked message', data.messageId, 'as read');
+                        }
+
+                        return updated;
+                    });
+                };
+
                 signalRConnection.on('ReceiveMessage', handleReceiveMessage);
+                signalRConnection.on('MessageMarkedAsRead', handleMessageMarkedAsRead);
 
                 return () => {
                     signalRConnection.off('ReceiveMessage', handleReceiveMessage);
+                    signalRConnection.off('MessageMarkedAsRead', handleMessageMarkedAsRead);
                 };
             }
         }
@@ -150,21 +224,6 @@ const DriverMessagingModal = ({
             );
             setFirstUnreadIndex(unreadIndex);
 
-            // Find unread messages FROM the driver (we want to mark them as read)
-            const unreadIds = (todaysMessages || [])
-                .filter(msg => !msg.read && msg.from?.toLowerCase().startsWith('driver'))
-                .map(msg => msg.id);
-
-            // Mark them as read
-            if (unreadIds.length > 0) {
-                try {
-                    await messagesAPI.markAsRead(unreadIds);
-                    console.log('Marked messages as read:', unreadIds);
-                } catch (error) {
-                    console.error('Error marking messages as read:', error);
-                }
-            }
-
             scrollToBottom();
         } catch (error) {
             console.error('Error fetching messages:', error);
@@ -194,6 +253,34 @@ const DriverMessagingModal = ({
         setSending(true);
 
         try {
+            // Before sending, mark any unread driver messages as read
+            // (If dispatcher is replying, they obviously saw the messages)
+            const unreadDriverMessages = messages.filter(msg =>
+                msg.from?.toLowerCase().startsWith('driver') && !msg.read
+            );
+
+            if (unreadDriverMessages.length > 0) {
+                const unreadIds = unreadDriverMessages
+                    .map(msg => msg.id)
+                    .filter(id => id && typeof id === 'number');
+
+                if (unreadIds.length > 0) {
+                    try {
+                        await signalRConnection.invoke('MarkMessagesAsRead', unreadIds, 'dispatcher');
+                        console.log('Marked unread driver messages as read before sending:', unreadIds);
+                        // Update local state
+                        setMessages(prev => prev.map(msg =>
+                            unreadIds.includes(msg.id)
+                                ? { ...msg, read: true }
+                                : msg
+                        ));
+                    } catch (error) {
+                        console.error('Error marking unread messages as read:', error);
+                        // Continue sending even if marking fails
+                    }
+                }
+            }
+
             console.log('Sending message to driver', driverId, ':', messageText);
             console.log('Ride context:', rideContext);
 
@@ -203,29 +290,34 @@ const DriverMessagingModal = ({
 
             // Send via SignalR using DispatcherSendsMessage socket
             // This saves to DB and notifies the driver in real-time
-            await signalRConnection.invoke('DispatcherSendsMessage', {
+            const savedMessage = await signalRConnection.invoke('DispatcherSendsMessage', {
                 DispatcherId: user?.userId || 0,
                 DriverId: driverId,
                 Message: messageText,
                 RideId: rideContext?.rideId || null
             });
 
-            // Add to local messages (optimistic update)
+            console.log('✅ Message saved with ID:', savedMessage.id || savedMessage.Id);
+
+            // Add to local messages with the REAL database ID
             const sentMessage = {
-                id: Date.now(),
+                id: savedMessage.id || savedMessage.Id,
                 message: messageText,
                 driverId: driverId,
                 from: 'Dispatcher',
-                date: new Date().toISOString(),
+                date: savedMessage.date || savedMessage.Date || new Date().toISOString(),
                 read: false // Not yet read by driver
             };
 
             setMessages(prev => [...prev, sentMessage]);
             console.log('Message sent successfully to driver', driverId);
 
+            // Play sound notification for sent message
+            soundService.playMessageSentSound();
+
         } catch (error) {
             console.error('Error sending message:', error);
-            alert('Failed to send message. Please try again.');
+            showAlert('Error', 'Failed to send message. Please try again.', [{ text: 'OK' }], 'error');
             setNewMessage(messageText); // Restore message on error
         } finally {
             setSending(false);
@@ -257,21 +349,25 @@ const DriverMessagingModal = ({
 
     /**
      * Check if a message contains a clickable Cancel/Reassign pattern
-     * Pattern: "Cancel Ride Request: RideId 123" or "Reassign Ride Request: RideId 123"
+     * Pattern: "Cancel Ride Request: RideId 123" or "Reassign Ride Request: RideId 123" or "Reset Pickup Request: RideId 123"
      * Returns { isClickable: boolean, rideId: string|null }
      */
     const parseClickableMessage = (message) => {
         if (!message) return { isClickable: false, rideId: null };
 
-        // Match patterns like "Cancel Ride Request: RideId 123" or "Reassign Ride Request: RideId 123"
+        // Match patterns like "Cancel Ride Request: RideId 123" or "Reassign Ride Request: RideId 123" or "Reset Pickup Request: RideId 123"
         const cancelMatch = message.match(/Cancel Ride Request:\s*RideId\s*(\d+)/i);
         const reassignMatch = message.match(/Reassign Ride Request:\s*RideId\s*(\d+)/i);
-        console.log('Parsing message for clickable patterns:', message, 'cancel: ', cancelMatch, 'reassign: ', reassignMatch);
+        const resetMatch = message.match(/Reset Pickup Request:\s*RideId\s*(\d+)/i);
+        //console.log('Parsing message for clickable patterns:', message, 'cancel: ', cancelMatch, 'reassign: ', reassignMatch);
         if (cancelMatch) {
             return { isClickable: true, rideId: cancelMatch[1], type: 'cancel' };
         }
         if (reassignMatch) {
             return { isClickable: true, rideId: reassignMatch[1], type: 'reassign' };
+        }
+        if (resetMatch) {
+            return { isClickable: true, rideId: resetMatch[1], type: 'resetPickup' };
         }
 
         return { isClickable: false, rideId: null, type: null };
@@ -282,7 +378,9 @@ const DriverMessagingModal = ({
      */
     const handleMessageClick = (rideId) => {
         if (onNavigateToRideHistory && rideId) {
-            onClose(); // Close the modal first
+            //onClose(); // Close the modal first
+            // Don't call onClose() here - let navigateToRideHistory handle closing the modal
+            // to avoid race condition with URL updates
             onNavigateToRideHistory(rideId);
         }
     };
@@ -309,7 +407,7 @@ const DriverMessagingModal = ({
                     textTransform: 'uppercase',
                 }}
             >
-                Unread Messages
+                Unread
             </Typography>
             <Box sx={{ flex: 1, height: '1px', bgcolor: '#f44336' }} />
         </Box>
@@ -360,14 +458,18 @@ const DriverMessagingModal = ({
                             : isBroadcast
                                 ? '#fff3cd'
                                 : isClickable
-                                    ? type === 'cancel' ? '#ffebee' : '#fff3e0' // Light red for cancel, light orange for reassign
+                                    ? type === 'cancel' ? '#ffebee'
+                                        : type === 'resetPickup' ? '#fff3e0'
+                                            : '#e3f2fd' // Light red for cancel, light orange for reset, light blue for reassign
                                     : '#fff',
                         borderBottomRightRadius: isDispatcher ? 4 : 16,
                         borderBottomLeftRadius: isDispatcher ? 16 : 4,
                         border: isBroadcast
                             ? '1px solid #ffc107'
                             : isClickable && !isDispatcher
-                                ? type === 'cancel' ? '2px solid #f44336' : '2px solid #ff9800'
+                                ? type === 'cancel' ? '2px solid #f44336'
+                                    : type === 'resetPickup' ? '2px solid #ff9800'
+                                        : '2px solid #2196f3'
                                 : 'none',
                         cursor: isClickable && !isDispatcher ? 'pointer' : 'default',
                         transition: 'transform 0.1s, box-shadow 0.1s',
@@ -383,12 +485,12 @@ const DriverMessagingModal = ({
                             variant="caption"
                             sx={{
                                 display: 'block',
-                                color: type === 'cancel' ? '#d32f2f' : '#f57c00',
+                                color: type === 'cancel' ? '#d32f2f' : type === 'resetPickup' ? '#f57c00' : '#1976d2',
                                 fontWeight: 'bold',
                                 mb: 0.5,
                             }}
                         >
-                            ⚠️ {type === 'cancel' ? 'CANCEL REQUEST' : 'REASSIGN REQUEST'} - Click to view ride
+                            ⚠️ {type === 'cancel' ? 'CANCEL REQUEST' : type === 'resetPickup' ? 'RESET PICKUP REQUEST' : 'REASSIGN REQUEST'} - Click to view ride
                         </Typography>
                     )}
                     <Typography

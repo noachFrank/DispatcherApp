@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ridesAPI, driversAPI } from '../services/apiService';
+import { dashboardAPI } from '../services/apiService';
 import {
   Box,
   Card,
@@ -19,18 +19,19 @@ import {
   Person,
   DriveEta,
   Assignment,
-  Message as MessageIcon
+  Message as MessageIcon,
+  Repeat as RepeatIcon
 } from '@mui/icons-material';
 
 const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
   const [metrics, setMetrics] = useState({
     assignedRides: [],
-    ridesInProgress: [],
     openRides: [],
-    futureRides: [],
+    ridesInProgress: [],
+    recurringRidesThisWeek: [],
     todaysRides: [],
     activeDrivers: [],
-    driversCurrentlyDriving: []
+    driversOnJob: []
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -44,30 +45,36 @@ const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
       setLoading(true);
       setError(null);
 
-      const [assignedRides, ridesInProgress, openRides, futureRides, todaysRides, activeDrivers, driversCurrentlyDriving] = await Promise.all([
-        ridesAPI.getAssigned(),
-        ridesAPI.getInProgress(),
-        ridesAPI.getOpen(),
-        ridesAPI.getFuture(),
-        ridesAPI.getToday(),
-        driversAPI.getActive(),
-        driversAPI.getDriving()
-      ]);
+      // Use the comprehensive dashboard endpoint
+      const data = await dashboardAPI.getAll();
 
       setMetrics({
-        assignedRides: assignedRides || [],
-        ridesInProgress: ridesInProgress || [],
-        openRides: openRides || [],
-        futureRides: futureRides || [],
-        todaysRides: todaysRides || [],
-        activeDrivers: activeDrivers || [],
-        driversCurrentlyDriving: driversCurrentlyDriving || []
+        assignedRides: data.assignedRides || [],
+        openRides: data.openRides || [],
+        ridesInProgress: data.ridesInProgress || [],
+        recurringRidesThisWeek: data.recurringRidesThisWeek || [],
+        todaysRides: data.todaysRides || [],
+        activeDrivers: data.activeDrivers || [],
+        driversOnJob: data.driversOnJob || []
       });
     } catch (err) {
       console.error('Failed to load dashboard metrics:', err);
       setError('Failed to load dashboard data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Refresh individual metric
+  const refreshMetric = async (metricName, apiCall) => {
+    try {
+      const data = await apiCall();
+      setMetrics(prev => ({
+        ...prev,
+        [metricName]: data || []
+      }));
+    } catch (err) {
+      console.error(`Failed to refresh ${metricName}:`, err);
     }
   };
 
@@ -106,97 +113,8 @@ const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
 
       <Grid container spacing={3}
         justifyContent="center"
-        sx={{ maxWidth: 900, mx: 'auto' }}>
-        {/* First Row - Current Rides */}
-
-        <Grid item xs={12} sm={6} md={4}>
-          <Card
-            sx={{
-              cursor: 'pointer',
-              '&:hover': { boxShadow: 6 },
-              borderLeft: 4,
-              borderLeftColor: 'primary.main'
-            }}
-            onClick={() => handleMetricClick('assignedRides', metrics.assignedRides)}
-          >
-            <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                <Typography variant="h6" component="h3">
-                  Assigned Rides
-                </Typography>
-                <Chip
-                  label={(metrics.assignedRides || []).length}
-                  color="primary"
-                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
-                />
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Rides assigned to drivers but not yet started
-              </Typography>
-              <Assignment sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={4}>
-          <Card
-            sx={{
-              cursor: 'pointer',
-              '&:hover': { boxShadow: 6 },
-              borderLeft: 4,
-              borderLeftColor: 'warning.main'
-            }}
-            onClick={() => handleMetricClick('ridesInProgress', metrics.ridesInProgress)}
-          >
-            <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                <Typography variant="h6" component="h3">
-                  Rides in Progress
-                </Typography>
-                <Chip
-                  label={(metrics.ridesInProgress || []).length}
-                  color="warning"
-                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
-                />
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Rides currently being driven
-              </Typography>
-              <DirectionsCar sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={4}>
-          <Card
-            sx={{
-              cursor: 'pointer',
-              '&:hover': { boxShadow: 6 },
-              borderLeft: 4,
-              borderLeftColor: 'warning.main'
-            }}
-            onClick={() => handleMetricClick('openRides', metrics.openRides)}
-          >
-            <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                <Typography variant="h6" component="h3">
-                  Open Rides
-                </Typography>
-                <Chip
-                  label={(metrics.openRides || []).length}
-                  color="warning"
-                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
-                />
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Rides currently open and not yet assigned to drivers
-              </Typography>
-              <DirectionsCar sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Second Row - Scheduled & Today's Rides */}
+        sx={{ maxWidth: 900, mx: 'auto', mb: 4 }}>
+        {/* First Row - today & Recurring */}
         <Grid item xs={12} sm={6} md={4}>
           <Card
             sx={{
@@ -205,23 +123,23 @@ const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
               borderLeft: 4,
               borderLeftColor: 'info.main'
             }}
-            onClick={() => handleMetricClick('futureRides', metrics.futureRides)}
+            onClick={() => handleMetricClick('recurringRidesThisWeek', metrics.recurringRidesThisWeek)}
           >
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                 <Typography variant="h6" component="h3">
-                  Future Rides
+                  Recurring This Week
                 </Typography>
                 <Chip
-                  label={(metrics.futureRides || []).length}
+                  label={(metrics.recurringRidesThisWeek || []).length}
                   color="info"
                   sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
                 />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                Scheduled rides for future dates
+                Recurring rides this week
               </Typography>
-              <Schedule sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
+              <RepeatIcon sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
             </CardContent>
           </Card>
         </Grid>
@@ -248,14 +166,112 @@ const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
                 />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                All rides created or scheduled for today
+                Scheduled for today
               </Typography>
               <Today sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
             </CardContent>
           </Card>
         </Grid>
+      </Grid>
 
-        {/* Third Row - Drivers */}
+      {/* First Row - Current Rides */}
+      <Grid container spacing={3}
+        justifyContent="center"
+        sx={{ maxWidth: 900, mx: 'auto', mb: 4 }}>
+
+        <Grid item xs={12} sm={6} md={4}>
+          <Card
+            sx={{
+              cursor: 'pointer',
+              '&:hover': { boxShadow: 6 },
+              borderLeft: 4,
+              borderLeftColor: 'primary.main'
+            }}
+            onClick={() => handleMetricClick('assignedRides', metrics.assignedRides)}
+          >
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                <Typography variant="h6" component="h3">
+                  Assigned Rides
+                </Typography>
+                <Chip
+                  label={(metrics.assignedRides || []).length}
+                  color="primary"
+                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
+                />
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Assigned not started
+              </Typography>
+              <Assignment sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={4}>
+          <Card
+            sx={{
+              cursor: 'pointer',
+              '&:hover': { boxShadow: 6 },
+              borderLeft: 4,
+              borderLeftColor: 'warning.main'
+            }}
+            onClick={() => handleMetricClick('openRides', metrics.openRides)}
+          >
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                <Typography variant="h6" component="h3">
+                  Open Rides
+                </Typography>
+                <Chip
+                  label={(metrics.openRides || []).length}
+                  color="warning"
+                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
+                />
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Rides not assigned
+              </Typography>
+              <Schedule sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={4}>
+          <Card
+            sx={{
+              cursor: 'pointer',
+              '&:hover': { boxShadow: 6 },
+              borderLeft: 4,
+              borderLeftColor: 'error.main'
+            }}
+            onClick={() => handleMetricClick('ridesInProgress', metrics.ridesInProgress)}
+          >
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                <Typography variant="h6" component="h3">
+                  Rides in Progress
+                </Typography>
+                <Chip
+                  label={(metrics.ridesInProgress || []).length}
+                  color="error"
+                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
+                />
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Picked up, not dropped off
+              </Typography>
+              <DirectionsCar sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Third Row - Drivers */}
+      <Grid container spacing={3}
+        justifyContent="center"
+        sx={{ maxWidth: 900, mx: 'auto', mb: 4 }}>
+
         <Grid item xs={12} sm={6} md={4}>
           <Card
             sx={{
@@ -289,7 +305,7 @@ const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
                 />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                Drivers currently available for dispatch
+                All available drivers
               </Typography>
               <Person sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
             </CardContent>
@@ -302,23 +318,27 @@ const DashboardMetrics = ({ onMetricClick, hasUnreadMessages = false }) => {
               cursor: 'pointer',
               '&:hover': { boxShadow: 6 },
               borderLeft: 4,
-              borderLeftColor: 'error.main'
+              borderLeftColor: '#9c27b0'
             }}
-            onClick={() => handleMetricClick('driversCurrentlyDriving', metrics.driversCurrentlyDriving)}
+            onClick={() => handleMetricClick('driversOnJob', metrics.driversOnJob)}
           >
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                 <Typography variant="h6" component="h3">
-                  Drivers Currently Driving
+                  Drivers On Job
                 </Typography>
                 <Chip
-                  label={(metrics.driversCurrentlyDriving || []).length}
-                  color="error"
-                  sx={{ fontSize: '1.1rem', fontWeight: 'bold' }}
+                  label={(metrics.driversOnJob || []).length}
+                  sx={{
+                    fontSize: '1.1rem',
+                    fontWeight: 'bold',
+                    bgcolor: '#9c27b0',
+                    color: 'white'
+                  }}
                 />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                Drivers currently on active rides
+                Currently on active calls
               </Typography>
               <DriveEta sx={{ position: 'absolute', top: 16, right: 16, opacity: 0.3 }} />
             </CardContent>

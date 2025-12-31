@@ -97,7 +97,7 @@ const getAvailableDriverIcon = () => ({
  * - Click on driver to open side panel with details and upcoming calls
  * - Map only moves when user interacts with it (not auto-centering)
  */
-const DriverTracking = () => {
+const DriverTracking = ({ isAdmin = false }) => {
     const { isLoaded, loadError } = useGoogleMaps();
     const { signalRConnection } = useAuth();
     const [map, setMap] = useState(null);
@@ -129,7 +129,18 @@ const DriverTracking = () => {
                 console.log('🚗 Driving drivers:', drivingData?.length || 0, drivingData);
                 console.log('🟢 Online/Available drivers:', onlineData?.length || 0, onlineData);
 
-                setDrivingDrivers(drivingData || []);
+                // Deduplicate driving drivers by ID (in case API returns duplicates)
+                const uniqueDrivingDrivers = [];
+                const seenDrivingIds = new Set();
+                (drivingData || []).forEach(driver => {
+                    const id = driver.driver?.id || driver.driverId || driver.id;
+                    if (id && !seenDrivingIds.has(id)) {
+                        seenDrivingIds.add(id);
+                        uniqueDrivingDrivers.push(driver);
+                    }
+                });
+
+                setDrivingDrivers(uniqueDrivingDrivers);
                 setOnlineDrivers(onlineData || []);
 
                 // If a driver panel is open, update it with fresh data
@@ -194,7 +205,19 @@ const DriverTracking = () => {
                     driversAPI.getDriversDriving().catch(() => []),
                     driversAPI.getOnlineDrivers().catch(() => [])
                 ]);
-                setDrivingDrivers(drivingData || []);
+
+                // Deduplicate driving drivers by ID (in case API returns duplicates)
+                const uniqueDrivingDrivers = [];
+                const seenDrivingIds = new Set();
+                (drivingData || []).forEach(driver => {
+                    const id = driver.driver?.id || driver.driverId || driver.id;
+                    if (id && !seenDrivingIds.has(id)) {
+                        seenDrivingIds.add(id);
+                        uniqueDrivingDrivers.push(driver);
+                    }
+                });
+
+                setDrivingDrivers(uniqueDrivingDrivers);
                 setOnlineDrivers(onlineData || []);
             } catch (err) {
                 console.error('Failed to refresh driver lists:', err);
@@ -459,7 +482,12 @@ const DriverTracking = () => {
 
     // Count drivers with known locations
     const drivingWithLocations = drivingDrivers.filter(d => getDriverPosition(d) !== null);
-    const onlineWithLocations = onlineDrivers.filter(d => getDriverPosition(d) !== null);
+
+    // Filter out online drivers that are already in the driving list to prevent duplicate keys
+    const drivingDriverIds = new Set(drivingDrivers.map(d => getDriverId(d)));
+    const uniqueOnlineDrivers = onlineDrivers.filter(d => !drivingDriverIds.has(getDriverId(d)));
+    const onlineWithLocations = uniqueOnlineDrivers.filter(d => getDriverPosition(d) !== null);
+
     const totalOnMap = drivingWithLocations.length + onlineWithLocations.length;
 
     return (
@@ -479,11 +507,11 @@ const DriverTracking = () => {
                         />
                         <Chip
                             icon={<CircleIcon sx={{ fontSize: 12 }} />}
-                            label={`${onlineDrivers.length} Available`}
+                            label={`${uniqueOnlineDrivers.length} Available`}
                             size="small"
                             color="success"
                         />
-                        {totalOnMap < (drivingDrivers.length + onlineDrivers.length) && (
+                        {totalOnMap < (drivingDrivers.length + uniqueOnlineDrivers.length) && (
                             <Chip
                                 label={`${totalOnMap} with GPS`}
                                 size="small"
@@ -514,7 +542,7 @@ const DriverTracking = () => {
                     <Badge badgeContent={drivingDrivers.length} color="primary">
                         <CarIcon fontSize="large" />
                     </Badge>
-                    <Badge badgeContent={onlineDrivers.length} color="success">
+                    <Badge badgeContent={uniqueOnlineDrivers.length} color="success">
                         <PersonIcon fontSize="large" />
                     </Badge>
                 </Box>
@@ -549,7 +577,7 @@ const DriverTracking = () => {
                     })}
 
                     {/* Available Driver Markers (green) */}
-                    {onlineDrivers.map(driverData => {
+                    {uniqueOnlineDrivers.map(driverData => {
                         const position = getDriverPosition(driverData);
                         if (!position) return null;
 
@@ -746,7 +774,7 @@ const DriverTracking = () => {
                                                 <ListItemIcon><DurationIcon fontSize="small" color="info" /></ListItemIcon>
                                                 <ListItemText
                                                     primary="Est. Duration"
-                                                    secondary={formatDuration(sidePanelDriver.currentRide.estimatedDuration)}
+                                                    secondary={formatDuration(sidePanelDriver.currentRide.route?.estimatedDuration)}
                                                 />
                                             </ListItem>
                                             <ListItem>
@@ -761,17 +789,19 @@ const DriverTracking = () => {
                                                     secondary={sidePanelDriver.currentRide.passengers || 'N/A'}
                                                 />
                                             </ListItem>
-                                            <ListItem>
-                                                <ListItemIcon><MoneyIcon fontSize="small" /></ListItemIcon>
-                                                <ListItemText
-                                                    primary="Cost"
-                                                    secondary={formatCurrency(sidePanelDriver.currentRide.cost)}
-                                                />
-                                                <ListItemText
-                                                    primary="Payment Type"
-                                                    secondary={sidePanelDriver.currentRide.paymentType || 'N/A'}
-                                                />
-                                            </ListItem>
+                                            {isAdmin && (
+                                                <ListItem>
+                                                    <ListItemIcon><MoneyIcon fontSize="small" /></ListItemIcon>
+                                                    <ListItemText
+                                                        primary="Cost"
+                                                        secondary={formatCurrency(sidePanelDriver.currentRide.cost)}
+                                                    />
+                                                    <ListItemText
+                                                        primary="Payment Type"
+                                                        secondary={sidePanelDriver.currentRide.paymentType || 'N/A'}
+                                                    />
+                                                </ListItem>
+                                            )}
                                             {sidePanelDriver.currentRide.notes && (
                                                 <ListItem>
                                                     <ListItemIcon><NotesIcon fontSize="small" /></ListItemIcon>
@@ -906,15 +936,13 @@ const DriverTracking = () => {
                                                                         {ride.route?.dropOff || 'N/A'}
                                                                     </Typography>
                                                                 </Box>
-                                                                <Chip
+                                                                {!!stops && <Chip
                                                                     label={`${stops} stop${stops != 1 ? 's' : ''}`}
                                                                     size="small"
                                                                     variant="outlined"
                                                                     color="info"
                                                                     sx={{ height: 20, fontSize: '0.7rem' }}
-                                                                />                                                      <Box display="flex" alignItems="flex-start" gap={0.5} pl={1}>
-
-                                                                </Box>
+                                                                />}
                                                             </ListItem>
                                                         )
                                                     })}

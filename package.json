@@ -17,6 +17,7 @@
     "@mui/lab": "^7.0.1-beta.19",
     "@mui/material": "^7.3.5",
     "@react-google-maps/api": "^2.20.7",
+    "@square/web-sdk": "^2.1.0",
     "axios": "^1.13.2",
     "bootstrap": "^5.3.2",
     "react": "^19.1.1",

@@ -1,4 +1,6 @@
 import * as signalR from '@microsoft/signalr';
+import { tokenManager } from '../config/apiConfig';
+import environmentConfig from '../config/environment';
 
 class SignalRService {
   constructor() {
@@ -8,14 +10,17 @@ class SignalRService {
     this.callUpdateCallbacks = [];
     this.driverLocationCallbacks = [];
     this.driverLocationRemovedCallbacks = [];
+    this.messageMarkedAsReadCallbacks = [];
   }
 
-  async initialize(hubUrl = 'http://192.168.1.41:5062/hubs/dispatch') {
+  async initialize(hubUrl = environmentConfig.SIGNALR_HUB_URL) {
+    const token = tokenManager.getToken();
 
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
         skipNegotiation: true,
-        transport: signalR.HttpTransportType.WebSockets
+        transport: signalR.HttpTransportType.WebSockets,
+        accessTokenFactory: () => token // Add JWT token for authentication
       })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build();
@@ -27,6 +32,12 @@ class SignalRService {
 
     this.connection.on('DriverLocationRemoved', (driverId) => {
       this.driverLocationRemovedCallbacks.forEach(cb => cb(driverId));
+    });
+
+    // Handle message marked as read notification
+    this.connection.on('MessageMarkedAsRead', (data) => {
+      console.log('Message marked as read:', data);
+      this.messageMarkedAsReadCallbacks.forEach(cb => cb(data));
     });
 
     try {
@@ -255,6 +266,46 @@ class SignalRService {
 
   isConnected() {
     return this.connection && this.connection.state === signalR.HubConnectionState.Connected;
+  }
+
+  /**
+   * Mark messages as read via SignalR
+   * This will update the database and notify the sender (driver)
+   * 
+   * @param {number[]} messageIds - Array of message IDs to mark as read
+   */
+  async markMessagesAsRead(messageIds) {
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      console.warn('Cannot mark messages as read: SignalR not connected');
+      throw new Error('SignalR not connected');
+    }
+
+    if (!messageIds || messageIds.length === 0) {
+      console.warn('No message IDs provided to mark as read');
+      return;
+    }
+
+    try {
+      await this.connection.invoke('MarkMessagesAsRead', messageIds, 'dispatcher');
+      console.log('✅ Marked messages as read:', messageIds);
+    } catch (err) {
+      console.error('Failed to mark messages as read:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Subscribe to message marked as read events
+   * Called when a driver marks your message as read
+   * 
+   * @param {function} callback - Callback function to handle read receipt
+   * @returns {function} Unsubscribe function
+   */
+  onMessageMarkedAsRead(callback) {
+    this.messageMarkedAsReadCallbacks.push(callback);
+    return () => {
+      this.messageMarkedAsReadCallbacks = this.messageMarkedAsReadCallbacks.filter(cb => cb !== callback);
+    };
   }
 }
 

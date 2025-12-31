@@ -32,15 +32,19 @@ import {
   Remove as RemoveIcon,
   Close as CloseIcon,
   Schedule as ScheduleIcon,
-  Send as SendIcon
+  Send as SendIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { useAlert } from '../contexts/AlertContext';
 import signalRService from '../services/signalRService';
 import { creditCardStorage } from '../utils/creditCardStorage';
-import { driversAPI } from '../services/apiService';
+import { driversAPI, ridesAPI } from '../services/apiService';
 import AddressAutocomplete from './AddressAutocomplete';
+import SquarePaymentForm from './SquarePaymentForm';
 import { calculateRoute } from '../services/routeCalculator';
 import { useGoogleMaps } from './GoogleMapsProvider';
+import soundService from '../services/soundService';
 
 // Car type options matching the C# CarType enum
 const CAR_TYPES = [
@@ -49,12 +53,15 @@ const CAR_TYPES = [
   { value: 2, label: 'MiniVan' },
   { value: 3, label: '12 Passenger' },
   { value: 4, label: '15 Passenger' },
-  { value: 5, label: 'Luxury SUV' }
+  { value: 5, label: 'Luxury SUV' },
+  { value: 6, label: 'Mercedes Sprinter' }
+
 ];
 
 
 const NewCallWizard = ({ onComplete, onCancel }) => {
   const { user, signalRConnection } = useAuth();
+  const { showAlert, showToast } = useAlert();
   const { isLoaded: googleMapsLoaded } = useGoogleMaps();
   const [drivers, setDrivers] = useState([]);
   const [formData, setFormData] = useState({
@@ -62,12 +69,15 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     customerName: '',
     customerPhoneNumber: '',
     cost: 0,
+    driversCompensation: 0,
     notes: '',
     paymentType: 'cash',
     passengers: 1,
     carType: 0,
+    carSeat: false,
     assignedToId: null,
     assignedToName: '',
+    flightNumber: '',
 
     // Route object fields
     pickup: '',
@@ -76,20 +86,22 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     roundTrip: false,
     estimatedDuration: 0, // in minutes
 
-    // Credit card info (for payment processing)
-    ccNumber: '',
-    expiryDate: '',
-    cvv: '',
-    zipCode: ''
+    // Payment token (Square tokenization)
+    paymentTokenId: null
   });
 
   const [errors, setErrors] = useState({});
+  const phoneInputRef = useRef(null);
+  const stopRefs = useRef([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const [routeInfo, setRouteInfo] = useState({ distance: '', duration: '' });
+  const [pricingDetails, setPricingDetails] = useState(null);
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
   // Track if addresses were selected from autocomplete (not just typed)
   const [addressesValidated, setAddressesValidated] = useState({ pickup: false, dropOff: false });
   // Track which stop indices have been validated (selected from autocomplete)
@@ -109,7 +121,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     fetchDrivers();
   }, []);
 
-  // Phone number formatting
+  // Phone number formatting - only formats for display
   const formatPhoneNumber = (value) => {
     // Remove all non-digits
     const phoneNumber = value.replace(/\D/g, '');
@@ -124,12 +136,93 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     }
   };
 
+  // Extract digits only from formatted phone number
+  const extractPhoneDigits = (value) => {
+    return value.replace(/\D/g, '');
+  };
+
+  // Check if an address is an airport (JFK, LGA, EWR)
+  const isAirport = (address) => {
+    if (!address) return false;
+    const addr = address.toLowerCase();
+    return addr.includes('jfk') ||
+      addr.includes('john f. kennedy') ||
+      addr.includes('kennedy airport') ||
+      addr.includes('lga') ||
+      addr.includes('laguardia') ||
+      addr.includes('ewr') ||
+      addr.includes('newark airport') ||
+      addr.includes('newark liberty') ||
+      /\b11430\b/.test(address) || // JFK zip
+      /\b11371\b/.test(address) || // LGA zip
+      /\b07114\b/.test(address);   // EWR zip
+  };
+
+  // Handle backspace on phone number formatting characters
+  const handlePhoneBackspace = (e, fieldName) => {
+    if (e.key === 'Backspace') {
+      const input = e.target;
+      const cursorPos = input.selectionStart;
+      const value = input.value;
+      const charBefore = value[cursorPos - 1];
+
+      // If cursor is right after a formatting character, remove the digit before it
+      if (cursorPos > 0 && (charBefore === '(' || charBefore === ')' || charBefore === ' ' || charBefore === '-')) {
+        e.preventDefault();
+
+        let removeCount;
+        if (charBefore === ' ') {
+          // Space after ): remove space, ), and digit (3 chars total if available)
+          removeCount = Math.min(cursorPos, 3);
+        } else if (charBefore === '(') {
+          // Opening paren: remove ( and digit before it (or just ( if at start)
+          removeCount = cursorPos >= 2 ? 2 : 1;
+        } else {
+          // ) or -: remove formatting char and digit before it
+          removeCount = cursorPos >= 2 ? 2 : 1;
+        }
+
+        const newValue = value.slice(0, cursorPos - removeCount) + value.slice(cursorPos);
+        handleInputChange(fieldName, newValue);
+      }
+    }
+  };
+
   const handleInputChange = (field, value) => {
     let processedValue = value;
 
-    // Format phone number as user types
+    // For phone number, extract digits then format
     if (field === 'customerPhoneNumber') {
-      processedValue = formatPhoneNumber(value);
+      // Get current cursor position before formatting
+      const input = phoneInputRef.current;
+      const cursorPos = input?.selectionStart || 0;
+      const oldValue = formData.customerPhoneNumber || '';
+
+      // Extract digits from both old and new values
+      const oldDigits = extractPhoneDigits(oldValue);
+      const newDigits = extractPhoneDigits(value);
+
+      // Format the new value
+      processedValue = formatPhoneNumber(newDigits);
+
+      // Calculate new cursor position after formatting
+      // If digits were removed (backspace), keep cursor at same position
+      if (newDigits.length < oldDigits.length) {
+        // User deleted a digit - maintain cursor position
+        setTimeout(() => {
+          if (input) {
+            // Find the position in the new formatted string
+            let newPos = cursorPos;
+            // If cursor was after a formatting char that got removed, adjust
+            if (processedValue[cursorPos - 1] === ')' ||
+              processedValue[cursorPos - 1] === ' ' ||
+              processedValue[cursorPos - 1] === '-') {
+              newPos = cursorPos - 1;
+            }
+            input.setSelectionRange(newPos, newPos);
+          }
+        }, 0);
+      }
     }
 
     setFormData(prev => ({
@@ -160,7 +253,8 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     // Only calculate if both addresses were selected from autocomplete
     if (!googleMapsLoaded || !formData.pickup || !formData.dropOff) {
       setRouteInfo({ distance: '', duration: '' });
-      setFormData(prev => ({ ...prev, estimatedDuration: 0, cost: 0 }));
+      setFormData(prev => ({ ...prev, estimatedDuration: 0, cost: 0, driversCompensation: 0 }));
+      setPricingDetails(null);
       return;
     }
 
@@ -170,12 +264,14 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     }
 
     setIsCalculatingRoute(true);
+    setIsCalculatingPrice(true);
     try {
       // Only include stops that have been validated (selected from autocomplete)
       const validatedStops = formData.additionalStops.filter((s, index) =>
         s && s.trim() !== '' && stopsValidated.includes(index)
       );
 
+      // Calculate route for distance/duration display
       const result = await calculateRoute(
         formData.pickup,
         formData.dropOff,
@@ -184,7 +280,6 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       );
 
       if (result.error) {
-        // Silently handle errors - don't log to console for expected cases
         setRouteInfo({ distance: '', duration: '' });
       } else {
         setRouteInfo({
@@ -192,19 +287,71 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
           duration: result.durationText
         });
 
-        // Update estimated duration and calculate cost based on distance
-        const estimatedCost = Math.round(result.distance * 2.5); // $2.50 per mile
         setFormData(prev => ({
           ...prev,
-          estimatedDuration: result.duration,
-          cost: Math.max(10, estimatedCost) // Minimum $10
+          estimatedDuration: result.duration
         }));
       }
+
+      // Call pricing API for accurate pricing
+      await calculatePricing(validatedStops);
     } catch (error) {
       // Silently handle errors
       setRouteInfo({ distance: '', duration: '' });
     } finally {
       setIsCalculatingRoute(false);
+    }
+  };
+
+  // Calculate pricing using the server API
+  const calculatePricing = async (validatedStops = []) => {
+    try {
+      // Build scheduled time for rush hour calculation
+      let scheduledDateTime = null;
+      if (scheduledDate && scheduledTime) {
+        scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+      }
+
+      const priceRequest = {
+        pickup: formData.pickup,
+        dropOff: formData.dropOff,
+        stops: validatedStops,
+        carType: parseInt(formData.carType) || 0,
+        isRoundTrip: formData.roundTrip,
+        scheduledTime: scheduledDateTime
+      };
+
+      const response = await ridesAPI.calculatePrice(priceRequest);
+
+      if (response.success) {
+        setPricingDetails(response);
+        // Add $10 for car seat if needed
+        const carSeatSurcharge = formData.carSeat ? 10 : 0;
+        setFormData(prev => ({
+          ...prev,
+          cost: Math.round(response.totalPrice) + carSeatSurcharge,
+          driversCompensation: Math.round(response.driversCompensation)
+        }));
+      } else {
+        console.error('Pricing calculation failed:', response.error);
+        // Reset to 0 if pricing fails
+        setPricingDetails(null);
+        setFormData(prev => ({
+          ...prev,
+          cost: 0,
+          driversCompensation: 0
+        }));
+      }
+    } catch (error) {
+      console.error('Error calculating price:', error);
+      setPricingDetails(null);
+      setFormData(prev => ({
+        ...prev,
+        cost: 0,
+        driversCompensation: 0
+      }));
+    } finally {
+      setIsCalculatingPrice(false);
     }
   };
 
@@ -217,7 +364,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     }, 500); // Debounce for 500ms
 
     return () => clearTimeout(timer);
-  }, [formData.pickup, formData.dropOff, formData.additionalStops, formData.roundTrip, googleMapsLoaded, addressesValidated, stopsValidated]);
+  }, [formData.pickup, formData.dropOff, formData.additionalStops, formData.roundTrip, formData.carType, formData.carSeat, scheduledDate, scheduledTime, googleMapsLoaded, addressesValidated, stopsValidated]);
 
   // Handle address selection from autocomplete
   const handleAddressSelect = (field, address, placeDetails) => {
@@ -256,29 +403,26 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     });
   };
 
-  const setPrice = () => {
-    // Placeholder logic for setting price based on pickup/drop-off
-    // In a real implementation, you would calculate distance and set price accordingly
-    if (!formData.pickup || !formData.dropOff) {
-      setFormData(prev => ({
-        ...prev,
-        ['cost']: 0
-      }));
+  const addStop = () => {
+    // Maximum 10 stops allowed (stop1 through stop10 in the database)
+    console.log(formData.additionalStops.length);
+    if (formData.additionalStops.length >= 10) {
+      showAlert('Maximum Stops', 'Maximum 10 stops allowed', [{ text: 'OK' }], 'warning');
       return;
     }
-    setFormData(prev => ({
-      ...prev,
-      ['cost']: 10
-    }));
-
-  };
-
-  const addStop = () => {
     const newStops = [...formData.additionalStops, ''];
     setFormData(prev => ({
       ...prev,
       additionalStops: newStops
     }));
+
+    // Focus on the newly added stop after render
+    setTimeout(() => {
+      const lastIndex = newStops.length - 1;
+      if (stopRefs.current[lastIndex]) {
+        stopRefs.current[lastIndex].focus();
+      }
+    }, 100);
   };
 
   const removeStop = (index) => {
@@ -308,7 +452,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     setStopsValidated(prev => prev.filter(i => i !== index));
   };
 
-  const validateForm = () => {
+  const validateForm = (skipTokenValidation = false) => {
     const newErrors = {};
     //console.log(formData.customerPhoneNumber);
     if (!formData.customerPhoneNumber.trim()) {
@@ -334,18 +478,10 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       newErrors.passengers = 'At least 1 passenger is required';
     }
 
-    if (formData.paymentType === 'dispatcherCC') {
-      if (!formData.ccNumber.trim()) {
-        newErrors.ccNumber = 'Credit card number is required';
-      }
-      if (!formData.expiryDate.trim()) {
-        newErrors.expiryDate = 'Expiry date is required';
-      }
-      if (!formData.cvv.trim()) {
-        newErrors.cvv = 'CVV is required';
-      }
-      if (!formData.zipCode.trim()) {
-        newErrors.zipCode = 'ZIP code is required';
+    // Only validate payment token if we didn't just tokenize (to avoid race condition)
+    if (formData.paymentType === 'dispatcherCC' && !skipTokenValidation) {
+      if (!formData.paymentTokenId) {
+        newErrors.paymentTokenId = 'Please enter credit card information';
       }
     }
 
@@ -380,18 +516,21 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       pickupTime: null,
       dropOffTime: null,
       cost: parseInt(formData.cost) || 0,
-      driversCompensation: formData.cost > 0 ? Math.round((parseInt(formData.cost)) * 0.6) : 0,
+      driversCompensation: parseInt(formData.driversCompensation) || 0,
       paidTime: null,
       assignedToId: formData.assignedToId || null,
       reassignedToId: null,
       notes: formData.notes || "",
       dispatchedById: user?.userId || null,
       paymentType: formData.paymentType,
+      paymentTokenId: formData.paymentTokenId || null,
       reassigned: false,
       canceled: false,
       passengers: parseInt(formData.passengers) || 1,
+      carSeat: formData.carSeat,
       carType: parseInt(formData.carType) || 0,
-      estimatedDuration: estimatedDurationTime,
+      isReoccurring: false,
+      flightNumber: formData.flightNumber || null,
       route: {
         routeId: 0,
         pickup: formData.pickup,
@@ -407,43 +546,66 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
         stop9: formData.additionalStops[8] || null,
         stop10: formData.additionalStops[9] || null,
         roundTrip: formData.roundTrip,
-        callTime: currentTime
+        callTime: currentTime,
+        estimatedDuration: estimatedDurationTime,
+
       }
     };
 
     return rideObject;
   };
 
-  const handleCreditCardStorage = (formData) => {
-    if (formData.paymentType === 'dispatcherCC') {
-      const ccDetails = {
-        ccNumber: formData.ccNumber,
-        expiryDate: formData.expiryDate,
-        cvv: formData.cvv,
-        zipCode: formData.zipCode
-      };
-      return creditCardStorage.save(ccDetails);
-    }
-    return null;
+  const handlePaymentTokenGenerated = (token, cardholderName) => {
+    console.log('✅ Payment token received:', token);
+    setFormData(prev => ({
+      ...prev,
+      paymentTokenId: token
+    }));
+    showToast(`Card tokenized successfully for ${cardholderName}`, 'success');
+  };
+
+  const handleTokenError = (error) => {
+    console.error('❌ Tokenization error:', error);
+    showAlert('Error', `Failed to process card: ${error}`, [{ text: 'OK' }]);
   };
 
   const handleSubmit = async () => {
-    if (!validateForm()) return;
+    // Track if we just tokenized successfully
+    let justTokenized = false;
+    
+    // If payment type is Dispatcher CC and no token yet, try to tokenize
+    if (formData.paymentType === 'dispatcherCC' && !formData.paymentTokenId) {
+      if (window.squareTokenizeCard) {
+        console.log('🔄 Attempting to tokenize card before submission...');
+        try {
+          const token = await window.squareTokenizeCard();
+          if (token) {
+            justTokenized = true;
+            // Wait for state to update
+            await new Promise(resolve => setTimeout(resolve, 700));
+          }
+        } catch (tokenError) {
+          console.error('❌ Tokenization failed during submission:', tokenError);
+          // Validation will catch the missing token and show error
+        }
+      } else {
+        console.warn('⚠️ Square tokenization function not available');
+      }
+    }
+    
+    console.log('Submitting new call request...', formData);
+    
+    // Skip token validation if we just tokenized (state may not be updated yet)
+    if (!validateForm(justTokenized)) return;
 
     setIsSubmitting(true);
     try {
-      // Handle credit card storage if CC payment
-      const ccStorageKey = handleCreditCardStorage(formData);
-      if (ccStorageKey) {
-        console.log('Credit card details saved locally with key:', ccStorageKey);
-      }
-
       const newRideData = buildNewRideObject();
-
+      console.log('Built ride object:', newRideData);
       try {
         if (signalRConnection) {
           console.log('Broadcasting new call via SignalR...');
-          await signalRConnection.invoke("NewCallCreated", newRideData);
+          await signalRConnection.invoke("NewCallCreated", newRideData, null);
         } else {
           console.warn('SignalR not connected, call created but not broadcasted in real-time');
         }
@@ -453,12 +615,15 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
 
       onComplete(newRideData);
 
-      clearForm();
+      //clearForm();
 
-      alert('Call sent!');
+      // Play success sound for call sent
+      soundService.playCallSentSound();
+
+      showToast('Call sent!', 'success');
     } catch (error) {
       console.error('Failed to create ride:', error);
-      alert('Failed to create ride. Please try again.');
+      showAlert('Error', 'Failed to create ride. Please try again.', [{ text: 'OK' }], 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -475,9 +640,10 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
 
   const handleScheduleSubmit = async () => {
     if (!scheduledDate || !scheduledTime) {
-      alert('Please select both date and time for scheduling');
+      showAlert('Missing Information', 'Please select both date and time for scheduling', [{ text: 'OK' }], 'warning');
       return;
     }
+
     await handleSubmit();
     // Clear schedule fields and hide the schedule section
     setScheduledDate('');
@@ -488,12 +654,13 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
   const clearForm = () => {
     setFormData({
       customerName: '',
-      customerName: '',
       customerPhoneNumber: '',
       cost: 0,
+      driversCompensation: 0,
       notes: '',
       paymentType: 'cash',
       passengers: 1,
+      carSeat: false,
       carType: 0,
       assignedToId: null,
       assignedToName: '',
@@ -501,24 +668,19 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       dropOff: '',
       roundTrip: false,
       additionalStops: [],
-      notes: '',
-      paymentType: 'cash',
-      ccNumber: '',
-      expiryDate: '',
-      cvv: '',
-      zipCode: ''
+      paymentTokenId: null
     });
     setErrors({});
     // Reset trip estimate and validation states
     setRouteInfo({ distance: '', duration: '' });
     setAddressesValidated({ pickup: false, dropOff: false });
     setStopsValidated([]);
+    setPricingDetails(null);
   };
 
-  const getTomorrowDate = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+  const getTodayDate = () => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
   };
 
   return (
@@ -563,9 +725,11 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                       type="tel"
                       value={formData.customerPhoneNumber}
                       onChange={(e) => handleInputChange('customerPhoneNumber', e.target.value)}
+                      onKeyDown={(e) => handlePhoneBackspace(e, 'customerPhoneNumber')}
                       error={!!errors.customerPhoneNumber}
                       helperText={errors.customerPhoneNumber}
                       placeholder="(555) 123-4567"
+                      inputRef={phoneInputRef}
                       inputProps={{ maxLength: 14 }}
                       margin="normal"
                       required
@@ -597,6 +761,20 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                       required
                     />
                   </Grid>
+
+                  {/* Flight Number - only show if pickup is an airport */}
+                  {isAirport(formData.pickup) && (
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Flight Number"
+                        value={formData.flightNumber}
+                        onChange={(e) => handleInputChange('flightNumber', e.target.value)}
+                        placeholder="e.g., AA123"
+                        margin="normal"
+                      />
+                    </Grid>
+                  )}
 
                   {/* Passengers */}
                   <Grid item xs={12} sm={3}>
@@ -635,6 +813,8 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                     </FormControl>
                   </Grid>
 
+
+
                   {/* Assigned To Driver */}
                   <Grid item xs={12} sm={6}>
                     <Autocomplete
@@ -660,28 +840,49 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                     />
                   </Grid>
 
-                  <Grid item xs={12}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={formData.roundTrip}
-                          onChange={(e) => handleInputChange('roundTrip', e.target.checked)}
-                        />
-                      }
-                      label="Round Trip"
-                    />
+                  <Grid item xs={12} sm={3}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', mt: 2.5, gap: -0.5 }}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={formData.roundTrip}
+                            onChange={(e) => handleInputChange('roundTrip', e.target.checked)}
+                            size="small"
+                            sx={{ py: 0.25 }}
+                          />
+                        }
+                        label={<Typography variant="caption">Round Trip</Typography>}
+                        sx={{ m: 0, height: 24 }}
+                      />
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={formData.carSeat}
+                            onChange={(e) => handleInputChange('carSeat', e.target.checked)}
+                            color="primary"
+                            size="small"
+                            sx={{ py: 0.25 }}
+                          />
+                        }
+                        label={<Typography variant="caption">Needs Car Seat (+$10)</Typography>}
+                        sx={{ m: 0, height: 24 }}
+                      />
+                    </Box>
                   </Grid>
                 </Grid>
 
                 {/* Additional Stops */}
                 <Box sx={{ mt: 2 }}>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                    <Typography variant="subtitle2">Additional Stops</Typography>
+                    <Typography variant="subtitle2">
+                      Additional Stops {formData.additionalStops.length > 0 && `(${formData.additionalStops.length}/10)`}
+                    </Typography>
                     <Button
                       size="small"
                       startIcon={<AddIcon />}
                       onClick={addStop}
                       variant="outlined"
+                      disabled={formData.additionalStops.length >= 10}
                     >
                       Add Stop
                     </Button>
@@ -691,6 +892,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                     <Box key={index} display="flex" alignItems="flex-start" gap={1} mb={1}>
                       <Box sx={{ flex: 1 }}>
                         <AddressAutocomplete
+                          ref={(el) => (stopRefs.current[index] = el)}
                           label={`Stop ${index + 1}`}
                           value={stop}
                           onChange={(address, placeDetails) => handleStopSelect(index, address, placeDetails)}
@@ -750,16 +952,115 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                     </Box>
                   )}
 
+                  {/* Pricing Section */}
                   <Box>
                     <Typography variant="subtitle2" gutterBottom>
-                      Estimated Cost
+                      Pricing
                     </Typography>
-                    <Chip
-                      label={`$${formData.cost.toFixed(2)}`}
-                      color="primary"
-                      variant="outlined"
-                      size="large"
-                    />
+                    {isCalculatingPrice ? (
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <CircularProgress size={16} />
+                        <Typography variant="body2" color="text.secondary">
+                          Calculating price...
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Box display="flex" flexDirection="column" gap={0.5}>
+                        <Box display="flex" gap={1} alignItems="center">
+                          {isEditingPrice ? (
+                            <>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={formData.cost}
+                                onChange={(e) => handleInputChange('cost', parseFloat(e.target.value) || 0)}
+                                label="Total"
+                                InputProps={{
+                                  startAdornment: <Typography variant="body2" sx={{ mr: 0.5 }}>$</Typography>,
+                                }}
+                                sx={{ width: '120px' }}
+                              />
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={formData.driversCompensation}
+                                onChange={(e) => handleInputChange('driversCompensation', parseFloat(e.target.value) || 0)}
+                                label="Driver"
+                                InputProps={{
+                                  startAdornment: <Typography variant="body2" sx={{ mr: 0.5 }}>$</Typography>,
+                                }}
+                                sx={{ width: '120px' }}
+                              />
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => setIsEditingPrice(false)}
+                              >
+                                <CloseIcon fontSize="small" />
+                              </IconButton>
+                            </>
+                          ) : (
+                            <>
+                              <Chip
+                                label={`Total: $${formData.cost.toFixed(2)}`}
+                                color="primary"
+                                size="medium"
+                              />
+                              <Chip
+                                label={`Driver: $${formData.driversCompensation.toFixed(2)}`}
+                                color="success"
+                                variant="outlined"
+                                size="medium"
+                              />
+                              <IconButton
+                                size="small"
+                                onClick={() => setIsEditingPrice(true)}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </>
+                          )}
+                        </Box>
+                        {/* {pricingDetails && (
+                          <Box display="flex" gap={1} flexWrap="wrap">
+                            <Chip
+                              label={pricingDetails.pricingMethod === 'SET_PRICE' ? 'Set Price' : 'Formula'}
+                              size="small"
+                              variant="outlined"
+                              color={pricingDetails.pricingMethod === 'SET_PRICE' ? 'info' : 'warning'}
+                            />
+                            {pricingDetails.originArea && pricingDetails.originArea !== 'UNKNOWN' && (
+                              <Chip
+                                label={`${pricingDetails.originArea} → ${pricingDetails.destinationArea}`}
+                                size="small"
+                                variant="outlined"
+                              />
+                            )}
+                            {pricingDetails.rushHourSurcharge > 0 && (
+                              <Chip
+                                label={`Rush +$${pricingDetails.rushHourSurcharge}`}
+                                size="small"
+                                color="warning"
+                              />
+                            )}
+                            {pricingDetails.minimumFareApplied && (
+                              <Chip
+                                label="Min $65"
+                                size="small"
+                                color="info"
+                              />
+                            )}
+                            {formData.carSeat && (
+                              <Chip
+                                label="Car Seat +$10"
+                                size="small"
+                                color="secondary"
+                              />
+                            )}
+                          </Box>
+                        )} */}
+                      </Box>
+                    )}
                   </Box>
 
                   {/* Notes */}
@@ -800,9 +1101,9 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                       label="Cash"
                     />
                     <FormControlLabel
-                      value="check"
+                      value="zelle"
                       control={<Radio />}
-                      label="Check"
+                      label="Zelle"
                     />
                     <FormControlLabel
                       value="driverCC"
@@ -823,59 +1124,20 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                     <Typography variant="subtitle1" gutterBottom>
                       Credit Card Information
                     </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Enter credit card details. Card will be tokenized securely (no raw card data is stored).
+                    </Typography>
 
-                    <TextField
-                      fullWidth
-                      label="Card Number *"
-                      value={formData.ccNumber}
-                      onChange={(e) => handleInputChange('ccNumber', e.target.value)}
-                      error={!!errors.ccNumber}
-                      helperText={errors.ccNumber}
-                      placeholder="1234 5678 9012 3456"
-                      margin="normal"
-                      required
+                    <SquarePaymentForm
+                      onTokenGenerated={handlePaymentTokenGenerated}
+                      onError={handleTokenError}
                     />
 
-                    <Grid container spacing={2} sx={{ mt: 1 }}>
-                      <Grid item xs={4}>
-                        <TextField
-                          fullWidth
-                          label="Expiry Date *"
-                          value={formData.expiryDate}
-                          onChange={(e) => handleInputChange('expiryDate', e.target.value)}
-                          error={!!errors.expiryDate}
-                          helperText={errors.expiryDate}
-                          placeholder="MM/YY"
-                          required
-                        />
-                      </Grid>
-
-                      <Grid item xs={4}>
-                        <TextField
-                          fullWidth
-                          label="CVV *"
-                          value={formData.cvv}
-                          onChange={(e) => handleInputChange('cvv', e.target.value)}
-                          error={!!errors.cvv}
-                          helperText={errors.cvv}
-                          placeholder="123"
-                          required
-                        />
-                      </Grid>
-
-                      <Grid item xs={4}>
-                        <TextField
-                          fullWidth
-                          label="Zip Code *"
-                          value={formData.zipCode}
-                          onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                          error={!!errors.zipCode}
-                          helperText={errors.zipCode}
-                          placeholder="12345"
-                          required
-                        />
-                      </Grid>
-                    </Grid>
+                    {errors.paymentTokenId && (
+                      <Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>
+                        {errors.paymentTokenId}
+                      </Typography>
+                    )}
                   </Box>
                 )}
               </CardContent>
@@ -899,7 +1161,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                     value={scheduledDate}
                     onChange={(e) => setScheduledDate(e.target.value)}
                     InputLabelProps={{ shrink: true }}
-                    inputProps={{ min: getTomorrowDate() }}
+                    inputProps={{ min: getTodayDate() }}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>

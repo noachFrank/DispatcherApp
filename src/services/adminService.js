@@ -42,6 +42,16 @@ export const adminAPI = {
         console.error('Failed to update dispatcher:', error);
         throw error;
       }
+    },
+
+    // Fire dispatcher
+    fire: async (dispatcherId) => {
+      try {
+        return await userAPI.fireDispatcher(dispatcherId);
+      } catch (error) {
+        console.error('Failed to fire dispatcher:', error);
+        throw error;
+      }
     }
 
   },
@@ -94,19 +104,18 @@ export const adminAPI = {
         console.error('Failed to update driver:', error);
         throw error;
       }
+    },
+
+    // Fire driver
+    fire: async (driverId) => {
+      try {
+        return await userAPI.fireDriver(driverId);
+      } catch (error) {
+        console.error('Failed to fire driver:', error);
+        throw error;
+      }
     }
 
-    // // Delete driver
-    // delete: async (id) => {
-    //   try {
-    //     return await apiRequest(`${config.ENDPOINTS.DRIVERS.DELETE}/${id}`, {
-    //       method: 'DELETE'
-    //     });
-    //   } catch (error) {
-    //     console.error('Failed to delete driver:', error);
-    //     throw error;
-    //   }
-    // }
   },
 
   // Cars Management
@@ -174,6 +183,16 @@ export const adminAPI = {
         console.error('Failed to check user role:', error);
         // Return mock admin role for development
         return { isAdmin: false };
+      }
+    },
+
+    // Get all fired workers (dispatchers and drivers)
+    getFiredWorkers: async () => {
+      try {
+        return await userAPI.getFiredWorkers();
+      } catch (error) {
+        console.error('Failed to fetch fired workers:', error);
+        throw error;
       }
     }
   }

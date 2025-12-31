@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -26,13 +26,21 @@ import {
   Close as CloseIcon,
   Person as PersonIcon,
   Phone as PhoneIcon,
-  Email as EmailIcon
+  Email as EmailIcon,
+  PersonOff as PersonOffIcon
 } from '@mui/icons-material';
 import { adminAPI } from '../services/adminService';
+import { messagesAPI, userAPI } from '../services/apiService';
+import { useAlert } from '../contexts/AlertContext';
+import { useNavigate, useLocation } from 'react-router-dom';
 import CarManager from './CarManager';
 import DriverMessagingModal from './DriverMessagingModal';
+import { formatDate } from '../utils/dateHelpers';
 
-const DriverManager = ({ onNavigateToRideHistory }) => {
+const DriverManager = ({ onNavigateToRideHistory, openMessagingModal, openMessagingDriverId, onMessagingModalClose, onMarkMessagesRead }) => {
+  const { showAlert, showToast } = useAlert();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [drivers, setDrivers] = useState([]);
   const [filteredDrivers, setFilteredDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +53,9 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
   const [messagingDriverId, setMessagingDriverId] = useState(null);
   const [messagingDriverName, setMessagingDriverName] = useState('');
   const [driverUnreadCounts, setDriverUnreadCounts] = useState({});
+  const [fireConfirmOpen, setFireConfirmOpen] = useState(false);
+  const [driverToFire, setDriverToFire] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -55,8 +66,9 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
 
   // Validation state
   const [validationErrors, setValidationErrors] = useState({});
+  const phoneInputRef = useRef(null);
 
-  // Phone number formatting
+  // Phone number formatting - only formats for display
   const formatPhoneNumber = (value) => {
     // Remove all non-digits
     const phoneNumber = value.replace(/\D/g, '');
@@ -68,6 +80,41 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
       return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
     } else {
       return phoneNumber;
+    }
+  };
+
+  // Extract digits only from formatted phone number
+  const extractPhoneDigits = (value) => {
+    return value.replace(/\D/g, '');
+  };
+
+  // Handle backspace on phone number formatting characters
+  const handlePhoneBackspace = (e, fieldName) => {
+    if (e.key === 'Backspace') {
+      const input = e.target;
+      const cursorPos = input.selectionStart;
+      const value = input.value;
+      const charBefore = value[cursorPos - 1];
+
+      // If cursor is right after a formatting character, remove the digit before it
+      if (cursorPos > 0 && (charBefore === '(' || charBefore === ')' || charBefore === ' ' || charBefore === '-')) {
+        e.preventDefault();
+
+        let removeCount;
+        if (charBefore === ' ') {
+          // Space after ): remove space, ), and digit (3 chars total if available)
+          removeCount = Math.min(cursorPos, 3);
+        } else if (charBefore === '(') {
+          // Opening paren: remove ( and digit before it (or just ( if at start)
+          removeCount = cursorPos >= 2 ? 2 : 1;
+        } else {
+          // ) or -: remove formatting char and digit before it
+          removeCount = cursorPos >= 2 ? 2 : 1;
+        }
+
+        const newValue = value.slice(0, cursorPos - removeCount) + value.slice(cursorPos);
+        handleInputChange(fieldName, newValue);
+      }
     }
   };
 
@@ -145,7 +192,7 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
   const loadDrivers = async () => {
     try {
       setLoading(true);
-      const data = await adminAPI.drivers.getAll();
+      const data = await adminAPI.drivers.getActive();
 
       const driversArray = Array.isArray(data) ? data : [];
 
@@ -164,26 +211,51 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
 
   const loadUnreadCounts = async () => {
     try {
-      const driversArray = Array.isArray(drivers) ? drivers : [];
-      const counts = {};
+      // Fetch unread messages from drivers
+      const unreadMessages = await messagesAPI.getUnread();
+      const messagesArray = unreadMessages || [];
 
-      // Set unread counts to 0 for now - can be implemented later if needed
-      driversArray.forEach((driver) => {
-        counts[driver.id] = 0;
+      // Count unread messages per driver
+      const counts = {};
+      messagesArray.forEach((msg) => {
+        counts[msg.driverId] = (counts[msg.driverId] || 0) + 1;
       });
 
       setDriverUnreadCounts(counts);
     } catch (error) {
       console.error('Failed to load unread counts:', error);
+      setDriverUnreadCounts({});
     }
   };
 
   const handleInputChange = (field, value) => {
     let processedValue = value;
 
-    // Format phone number as user types
+    // For phone number, extract digits then format
     if (field === 'phoneNumber') {
-      processedValue = formatPhoneNumber(value);
+      const input = phoneInputRef.current;
+      const cursorPos = input?.selectionStart || 0;
+      const oldValue = formData.phoneNumber || '';
+
+      const oldDigits = extractPhoneDigits(oldValue);
+      const newDigits = extractPhoneDigits(value);
+
+      processedValue = formatPhoneNumber(newDigits);
+
+      // Maintain cursor position after delete
+      if (newDigits.length < oldDigits.length) {
+        setTimeout(() => {
+          if (input) {
+            let newPos = cursorPos;
+            if (processedValue[cursorPos - 1] === ')' ||
+              processedValue[cursorPos - 1] === ' ' ||
+              processedValue[cursorPos - 1] === '-') {
+              newPos = cursorPos - 1;
+            }
+            input.setSelectionRange(newPos, newPos);
+          }
+        }, 0);
+      }
     }
 
     setFormData(prev => ({
@@ -200,6 +272,34 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!editingDriver) return;
+
+    await showAlert(
+      'Reset Password',
+      `Are you sure you want to reset the password for ${editingDriver.name}?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Yes, Reset Password',
+          onPress: async () => {
+            try {
+              await userAPI.forgotPassword(editingDriver.id, 'driver');
+              await showToast('A new password has been set to the driver.', 'success');
+            } catch (error) {
+              console.error('Error resetting password:', error);
+              showAlert('Error', 'Failed to reset password', [{ text: 'OK' }], 'error');
+            }
+          }
+        }
+      ],
+      'warning'
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -208,6 +308,7 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
       return;
     }
 
+    setSubmitting(true);
     try {
       if (editingDriver) {
         await adminAPI.drivers.update(formData);
@@ -217,7 +318,8 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
 
         // Check if there was a warning (email failed to send)
         if (response && response.warning) {
-          alert(`Warning: ${response.warning}\n\nTemporary Password: ${response.tempPassword}`);
+          showAlert('Error sending email', `Warning: ${response.warning}\n\nTemporary Password: ${response.tempPassword}`
+            , [{ text: 'OK' }], 'warning');
         }
       }
 
@@ -227,13 +329,16 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
 
     } catch (error) {
       console.error('Failed to save driver:', error);
-      alert('Failed to save driver. Please try again.');
+      showAlert('Error', 'Failed to save driver. Please try again.', [{ text: 'OK' }], 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleEdit = (driver) => {
     setEditingDriver(driver);
     setFormData({
+      id: driver.id,
       name: driver.name,
       email: driver.email,
       phoneNumber: driver.phoneNumber,
@@ -248,9 +353,51 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
   };
 
   const handleMessage = (driver) => {
-    setMessagingDriverId(driver.id);
-    setMessagingDriverName(driver.name);
-    setShowMessaging(true);
+    // Mark messages from this driver as read
+    if (onMarkMessagesRead) {
+      onMarkMessagesRead(driver.id);
+    }
+
+    // Use openMessagingModal if provided (URL-based approach)
+    if (openMessagingModal) {
+      openMessagingModal(driver.id);
+    } else {
+      // Fallback to old approach
+      setMessagingDriverId(driver.id);
+      setMessagingDriverName(driver.name);
+      setShowMessaging(true);
+    }
+  };
+
+  const handleFireClick = (driver) => {
+    setDriverToFire(driver);
+    setFireConfirmOpen(true);
+  };
+
+  const handleFireConfirm = async () => {
+    try {
+      const result = await adminAPI.drivers.fire(driverToFire.id);
+      setFireConfirmOpen(false);
+      setDriverToFire(null);
+
+      // Show success message with affected calls count
+      if (result && result.affectedCalls > 0) {
+        showToast(`Driver fired successfully. ${result.affectedCalls} active call(s) have been reassigned.`, 'success');
+      } else {
+        showToast('Driver fired successfully.', 'success');
+      }
+
+      // Refresh the list
+      loadDrivers();
+    } catch (error) {
+      console.error('Error firing driver:', error);
+      showAlert('Failed to fire driver', 'Failed to fire driver. Please try again.', [{ text: 'OK' }], 'error');
+    }
+  };
+
+  const handleFireCancel = () => {
+    setFireConfirmOpen(false);
+    setDriverToFire(null);
   };
 
   const resetForm = () => {
@@ -276,6 +423,11 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
     setMessagingDriverName('');
     // Refresh unread counts when closing messaging
     loadUnreadCounts();
+
+    // Notify parent that modal is closed (for URL-based modal)
+    if (onMessagingModalClose) {
+      onMessagingModalClose();
+    }
   };
 
   if (loading) {
@@ -361,9 +513,11 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
               type="tel"
               value={formData.phoneNumber}
               onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+              onKeyDown={(e) => handlePhoneBackspace(e, 'phoneNumber')}
               error={!!validationErrors.phoneNumber}
               helperText={validationErrors.phoneNumber}
               placeholder="(555) 123-4567"
+              inputRef={phoneInputRef}
               inputProps={{ maxLength: 14 }}
               margin="normal"
               required
@@ -385,11 +539,21 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
         </DialogContent>
 
         <DialogActions>
-          <Button onClick={resetForm} color="secondary">
+          {editingDriver && (
+            <Button
+              onClick={handleResetPassword}
+              color="warning"
+              disabled={submitting}
+              sx={{ mr: 'auto' }}
+            >
+              Reset Password
+            </Button>
+          )}
+          <Button onClick={resetForm} color="secondary" disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} variant="contained" color="primary">
-            {editingDriver ? 'Update' : 'Create'}
+          <Button onClick={handleSubmit} variant="contained" color="primary" disabled={submitting}>
+            {submitting ? <CircularProgress size={20} /> : (editingDriver ? 'Update' : 'Create')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -427,45 +591,61 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
                       <strong>License:</strong> {driver.license}
                     </Typography>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
-                      <strong>Joined:</strong> {new Date(driver.joinedDate).toLocaleDateString()}
+                      <strong>Joined:</strong> {formatDate(driver.joinedDate)}
                     </Typography>
                   </CardContent>
-                  <CardActions sx={{ flexWrap: 'wrap', gap: 1 }}>
-                    <Button
-                      onClick={() => handleEdit(driver)}
-                      startIcon={<EditIcon />}
-                      color="warning"
-                      variant="outlined"
-                      size="small"
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      onClick={() => handleViewCars(driver)}
-                      startIcon={<CarIcon />}
-                      color="info"
-                      variant="outlined"
-                      size="small"
-                    >
-                      View Cars
-                    </Button>
-                    <Box position="relative">
+                  <CardActions sx={{ flexDirection: 'column', gap: 1, alignItems: 'stretch' }}>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                       <Button
-                        onClick={() => handleMessage(driver)}
-                        startIcon={<MessageIcon />}
-                        color="primary"
+                        onClick={() => handleEdit(driver)}
+                        startIcon={<EditIcon />}
+                        color="warning"
+                        variant="contained"
+                        size="small"
+                        sx={{ flex: 1 }}
+                      >
+                        Edit
+                      </Button>
+
+                      <Badge
+                        badgeContent={driverUnreadCounts[driver.id] || 0}
+                        color="error"
+                        invisible={!driverUnreadCounts[driver.id] || driverUnreadCounts[driver.id] === 0}
+                        sx={{ flex: 1 }}
+                      >
+                        <Button
+                          onClick={() => handleMessage(driver)}
+                          startIcon={<MessageIcon />}
+                          color="success"
+                          variant="outlined"
+                          size="small"
+                          fullWidth
+                        >
+                          Message
+                        </Button>
+                      </Badge>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      <Button
+                        onClick={() => handleFireClick(driver)}
+                        startIcon={<PersonOffIcon />}
+                        color="error"
+                        variant="contained"
+                        size="small"
+                        sx={{ flex: 1 }}
+                      >
+                        Fire
+                      </Button>
+                      <Button
+                        onClick={() => handleViewCars(driver)}
+                        startIcon={<CarIcon />}
+                        color="info"
                         variant="outlined"
                         size="small"
                       >
-                        Message
+                        View Cars
                       </Button>
-                      {driverUnreadCounts[driver.id] > 0 && (
-                        <Badge
-                          badgeContent={driverUnreadCounts[driver.id]}
-                          color="error"
-                          sx={{ position: 'absolute', top: -8, right: -8 }}
-                        />
-                      )}
                     </Box>
                   </CardActions>
                 </Card>
@@ -477,12 +657,47 @@ const DriverManager = ({ onNavigateToRideHistory }) => {
 
       {/* Messaging Modal */}
       <DriverMessagingModal
-        isOpen={showMessaging}
+        isOpen={showMessaging || !!openMessagingDriverId}
         onClose={handleMessagingClose}
-        driverId={messagingDriverId}
+        driverId={openMessagingDriverId || messagingDriverId}
         driverName={messagingDriverName}
         onNavigateToRideHistory={onNavigateToRideHistory}
       />
+
+      {/* Fire Confirmation Dialog */}
+      <Dialog open={fireConfirmOpen} onClose={handleFireCancel}>
+        <DialogTitle>Confirm Fire Driver</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to fire <strong>{driverToFire?.name}</strong>?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This will:
+          </Typography>
+          <Box component="ul" sx={{ mt: 1, pl: 2 }}>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Set their end date and prevent them from logging in
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Reassign all their active calls to other drivers
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Notify other drivers about newly available calls
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="error" sx={{ mt: 2, fontWeight: 'bold' }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleFireCancel} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleFireConfirm} color="error" variant="contained">
+            Fire Driver
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

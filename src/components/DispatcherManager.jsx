@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { adminAPI } from '../services/adminService';
+import { userAPI } from '../services/apiService';
 import {
   Box,
   Card,
@@ -24,8 +25,12 @@ import {
   Edit as EditIcon,
   Close as CloseIcon,
   Phone as PhoneIcon,
-  Email as EmailIcon
+  Email as EmailIcon,
+  PersonOff as PersonOffIcon
 } from '@mui/icons-material';
+import { formatDate } from '../utils/dateHelpers';
+import { useAlert, } from '../contexts/AlertContext';
+
 
 const DispatcherManager = () => {
   const [dispatchers, setDispatchers] = useState([]);
@@ -34,6 +39,11 @@ const DispatcherManager = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingDispatcher, setEditingDispatcher] = useState(null);
+  const [fireConfirmOpen, setFireConfirmOpen] = useState(false);
+  const [dispatcherToFire, setDispatcherToFire] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { showAlert, showToast } = useAlert();
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -44,41 +54,10 @@ const DispatcherManager = () => {
     userName: '',
   });
 
-  // Helper function to safely format dates
-  const formatDate = (dateValue) => {
-    if (!dateValue) return 'N/A';
-
-    try {
-      // If it's already a Date object
-      if (dateValue instanceof Date) {
-        return dateValue.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        });
-      }
-
-      // If it's a string, try to parse it
-      const date = new Date(dateValue);
-      if (isNaN(date.getTime())) {
-        return dateValue; // Return original if can't parse
-      }
-
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateValue || 'N/A';
-    }
-  };
-
-  // Validation state
   const [validationErrors, setValidationErrors] = useState({});
+  const phoneInputRef = useRef(null);
 
-  // Phone number formatting
+  // Phone number formatting - only formats for display
   const formatPhoneNumber = (value) => {
     // Remove all non-digits
     const phoneNumber = value.replace(/\D/g, '');
@@ -90,6 +69,41 @@ const DispatcherManager = () => {
       return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
     } else {
       return phoneNumber;
+    }
+  };
+
+  // Extract digits only from formatted phone number
+  const extractPhoneDigits = (value) => {
+    return value.replace(/\D/g, '');
+  };
+
+  // Handle backspace on phone number formatting characters
+  const handlePhoneBackspace = (e, fieldName) => {
+    if (e.key === 'Backspace') {
+      const input = e.target;
+      const cursorPos = input.selectionStart;
+      const value = input.value;
+      const charBefore = value[cursorPos - 1];
+
+      // If cursor is right after a formatting character, remove the digit before it
+      if (cursorPos > 0 && (charBefore === '(' || charBefore === ')' || charBefore === ' ' || charBefore === '-')) {
+        e.preventDefault();
+
+        let removeCount;
+        if (charBefore === ' ') {
+          // Space after ): remove space, ), and digit (3 chars total if available)
+          removeCount = Math.min(cursorPos, 3);
+        } else if (charBefore === '(') {
+          // Opening paren: remove ( and digit before it (or just ( if at start)
+          removeCount = cursorPos >= 2 ? 2 : 1;
+        } else {
+          // ) or -: remove formatting char and digit before it
+          removeCount = cursorPos >= 2 ? 2 : 1;
+        }
+
+        const newValue = value.slice(0, cursorPos - removeCount) + value.slice(cursorPos);
+        handleInputChange(fieldName, newValue);
+      }
     }
   };
 
@@ -170,9 +184,10 @@ const DispatcherManager = () => {
   const handleInputChange = (field, value) => {
     let processedValue = value;
 
-    // Format phone number as user types
+    // For phone number, extract digits then format
     if (field === 'phoneNumber') {
-      processedValue = formatPhoneNumber(value);
+      const digits = extractPhoneDigits(value);
+      processedValue = formatPhoneNumber(digits);
     }
 
     setFormData(prev => ({
@@ -189,6 +204,34 @@ const DispatcherManager = () => {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!editingDispatcher) return;
+
+    await showAlert(
+      'Reset Password',
+      `Are you sure you want to reset the password for ${editingDispatcher.name}?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Yes, Reset Password',
+          onPress: async () => {
+            try {
+              await userAPI.forgotPassword(editingDispatcher.id);
+              await showToast('A new password has been set to the dispatcher.', 'success');
+            } catch (error) {
+              console.error('Error resetting password:', error);
+              showAlert('Error', 'Failed to reset password', [{ text: 'OK' }], 'error');
+            }
+          }
+        }
+      ],
+      'warning'
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -196,6 +239,8 @@ const DispatcherManager = () => {
     if (!validateForm()) {
       return;
     }
+
+    setSubmitting(true);
     try {
       if (editingDispatcher) {
         await adminAPI.dispatchers.update(formData);
@@ -205,7 +250,8 @@ const DispatcherManager = () => {
 
         // Check if there was a warning (email failed to send)
         if (response && response.warning) {
-          alert(`Warning: ${response.warning}\n\nTemporary Password: ${response.tempPassword}`);
+          showAlert('Error sending email', `Warning: ${response.warning}\n\nTemporary Password: ${response.tempPassword}`
+            , [{ text: 'OK' }], 'error');
         }
       }
 
@@ -215,13 +261,16 @@ const DispatcherManager = () => {
 
     } catch (error) {
       console.error('Failed to save dispatcher:', error);
-      alert('Failed to save dispatcher. Please try again.');
+      showAlert('Failed to save dispatcher', 'Failed to save dispatcher. Please try again.', [{ text: 'OK' }], 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleEdit = (dispatcher) => {
     setEditingDispatcher(dispatcher);
     setFormData({
+      id: dispatcher.id,
       name: dispatcher.name,
       email: dispatcher.email,
       phoneNumber: dispatcher.phoneNumber,
@@ -229,6 +278,31 @@ const DispatcherManager = () => {
       isAdmin: dispatcher.isAdmin ?? false
     });
     setShowAddForm(true);
+  };
+
+  const handleFireClick = (dispatcher) => {
+    setDispatcherToFire(dispatcher);
+    setFireConfirmOpen(true);
+  };
+
+  const handleFireConfirm = async () => {
+    try {
+      console.log('Firing dispatcher with ID:', dispatcherToFire.id);
+      await adminAPI.dispatchers.fire(dispatcherToFire.id);
+      showToast('Dispatcher fired successfully.', 'success');
+      setFireConfirmOpen(false);
+      setDispatcherToFire(null);
+      // Refresh the list
+      loadDispatchers();
+    } catch (error) {
+      console.error('Error firing dispatcher:', error);
+      showAlert('Error', 'Failed to fire dispatcher. Please try again.', [{ text: 'OK' }], 'error');
+    }
+  };
+
+  const handleFireCancel = () => {
+    setFireConfirmOpen(false);
+    setDispatcherToFire(null);
   };
 
 
@@ -319,9 +393,11 @@ const DispatcherManager = () => {
               type="tel"
               value={formData.phoneNumber}
               onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+              onKeyDown={(e) => handlePhoneBackspace(e, 'phoneNumber')}
               error={!!validationErrors.phoneNumber}
               helperText={validationErrors.phoneNumber}
               placeholder="(555) 123-4567"
+              inputRef={phoneInputRef}
               inputProps={{ maxLength: 14 }}
               margin="normal"
               required
@@ -351,11 +427,21 @@ const DispatcherManager = () => {
         </DialogContent>
 
         <DialogActions>
-          <Button onClick={resetForm} color="secondary">
+          {editingDispatcher && (
+            <Button
+              onClick={handleResetPassword}
+              color="warning"
+              disabled={submitting}
+              sx={{ mr: 'auto' }}
+            >
+              Reset Password
+            </Button>
+          )}
+          <Button onClick={resetForm} color="secondary" disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} variant="contained" color="primary">
-            {editingDispatcher ? 'Update' : 'Create'}
+          <Button onClick={handleSubmit} variant="contained" color="primary" disabled={submitting}>
+            {submitting ? <CircularProgress size={20} /> : (editingDispatcher ? 'Update' : 'Create')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -393,8 +479,8 @@ const DispatcherManager = () => {
                         <strong>Joined:</strong> {formatDate(dispatcher.dateJoined || dispatcher.DateJoined)}
                       </Typography>
                       <Box sx={{ mt: 1 }}>
-                        {dispatcher.isAdmin && <Chip label="Admin" color="error" size="small" sx={{ mr: 1 }} />}
-                        {dispatcher.isActive && <Chip label="Active" color="primary" size="small" />}
+                        {dispatcher.isActive && <Chip label="Active" color="success" size="small" sx={{ mr: 1 }} />}
+                        {dispatcher.isAdmin && <Chip label="Admin" color="primary" size="small" />}
                       </Box>
                     </CardContent>
                     <CardActions>
@@ -402,10 +488,19 @@ const DispatcherManager = () => {
                         onClick={() => handleEdit(dispatcher)}
                         startIcon={<EditIcon />}
                         color="warning"
-                        variant="outlined"
+                        variant="contained"
                         size="small"
                       >
                         Edit
+                      </Button>
+                      <Button
+                        onClick={() => handleFireClick(dispatcher)}
+                        startIcon={<PersonOffIcon />}
+                        color="error"
+                        variant="contained"
+                        size="small"
+                      >
+                        Fire
                       </Button>
                     </CardActions>
                   </Card>
@@ -415,6 +510,27 @@ const DispatcherManager = () => {
           </Grid>
         )}
       </Box>
+
+      {/* Fire Confirmation Dialog */}
+      <Dialog open={fireConfirmOpen} onClose={handleFireCancel}>
+        <DialogTitle>Confirm Fire Dispatcher</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to fire <strong>{dispatcherToFire?.name}</strong>?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This will set their end date and prevent them from logging in. This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleFireCancel} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleFireConfirm} color="error" variant="contained">
+            Fire Dispatcher
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

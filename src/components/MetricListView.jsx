@@ -20,28 +20,39 @@ import {
   Message as MessageIcon,
   Cancel as CancelIcon,
   SwapHoriz as ReassignIcon,
-  Phone as PhoneIcon,
-  LocationOn as LocationIcon,
-  Email as EmailIcon,
   Search as SearchIcon,
   Clear as ClearIcon,
-  MarkEmailUnread as UnreadIcon
+  MarkEmailUnread as UnreadIcon,
+  RestartAlt as ResetIcon,
+  Edit as EditIcon,
+  Check as CheckIcon,
+  Close as CloseIcon,
+  Repeat as RepeatIcon
 } from '@mui/icons-material';
 import DriverMessagingModal from './DriverMessagingModal';
-import { driversAPI, ridesAPI } from '../services/apiService';
+import { dashboardAPI } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { getRideStatus, getRideStatusColor, getDriverStatusColor } from '../utils/Status';
+import { useAlert } from '../contexts/AlertContext';
+import { getRideStatus, getRideStatusColor, getRideStatusStyle, getDriverStatusColor } from '../utils/Status';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const MetricListView = ({
+  isAdmin = false,
   metricType,
   data: initialData,
   onItemClick,
   onBackToDashboard,
-  driversWithUnread = new Set(),
+  driversWithUnread = new Map(),
   onMarkMessagesRead,
-  onNavigateToRideHistory
+  onMessagingModalClose,
+  onNavigateToRideHistory,
+  openMessagingModal,
+  openMessagingDriverId
 }) => {
   const { signalRConnection } = useAuth();
+  const { showAlert, showToast } = useAlert();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState(initialData || []);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMessaging, setShowMessaging] = useState(false);
@@ -50,6 +61,9 @@ const MetricListView = ({
   const [messagingRideContext, setMessagingRideContext] = useState(null); // { rideId, customerName, customerPhone }
   const [driverStatuses, setDriverStatuses] = useState({});
   const [loading, setLoading] = useState(false);
+  const [editingPriceRideId, setEditingPriceRideId] = useState(null);
+  const [editedPrice, setEditedPrice] = useState('');
+  const [editedDriverComp, setEditedDriverComp] = useState('');
 
   // Load data based on metricType when component mounts or when initialData is empty
   useEffect(() => {
@@ -68,25 +82,25 @@ const MetricListView = ({
         let fetchedData = [];
         switch (metricType) {
           case 'assignedRides':
-            fetchedData = await ridesAPI.getAssigned();
+            fetchedData = await dashboardAPI.getAssignedRides();
             break;
           case 'ridesInProgress':
-            fetchedData = await ridesAPI.getInProgress();
+            fetchedData = await dashboardAPI.getRidesInProgress();
             break;
           case 'openRides':
-            fetchedData = await ridesAPI.getOpen();
+            fetchedData = await dashboardAPI.getOpenRides();
             break;
-          case 'futureRides':
-            fetchedData = await ridesAPI.getFuture();
+          case 'recurringRidesThisWeek':
+            fetchedData = await dashboardAPI.getRecurringRidesThisWeek();
             break;
           case 'todaysRides':
-            fetchedData = await ridesAPI.getToday();
+            fetchedData = await dashboardAPI.getTodaysRides();
             break;
           case 'activeDrivers':
-            fetchedData = await driversAPI.getActive();
+            fetchedData = await dashboardAPI.getActiveDrivers();
             break;
-          case 'driversCurrentlyDriving':
-            fetchedData = await driversAPI.getDriving();
+          case 'driversOnJob':
+            fetchedData = await dashboardAPI.getDriversOnJob();
             break;
           default:
             console.warn('Unknown metric type:', metricType);
@@ -131,65 +145,122 @@ const MetricListView = ({
   }, [data, metricType]);
 
   const handleCancelCall = async (callId) => {
-    if (window.confirm('Are you sure you want to cancel this call?')) {
-      try {
-        await ridesAPI.cancel(callId);
-        alert('Call cancelled successfully');
-        // Refresh the data
-        window.location.reload();
-      } catch (error) {
-        console.error('Failed to cancel call:', error);
-        alert('Failed to cancel call. Please try again.');
-      }
-    }
+    showAlert(
+      'Cancel Call',
+      'Are you sure you want to cancel this call?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (signalRConnection && signalRConnection.state === 'Connected') {
+                console.log('Cancelling call via SignalR:', callId);
+                await signalRConnection.invoke("CallCanceled", callId);
+              } else {
+                const state = signalRConnection?.state || 'Not initialized';
+                console.warn('SignalR not connected, state:', state);
+                showAlert('Connection Error', `SignalR not connected (${state}). Please refresh the page and try again.`, [{ text: 'OK' }], 'error');
+                return;
+              }
+              showToast('Call cancelled successfully', 'success');
+              // Refresh the data
+              window.location.reload();
+            } catch (error) {
+              console.error('Failed to cancel call:', error);
+              showAlert('Error', `Failed to cancel call: ${error.message}`, [{ text: 'OK' }], 'error');
+            }
+          }
+        }
+      ],
+      'warning'
+    );
   };
 
   const handleReassignCall = async (callId) => {
-    if (window.confirm('Are you sure you want to reassign this call? The driver will be removed and the call will become available again.')) {
-      try {
-        // Use SignalR to notify about reassignment - this will:
-        // 1. Update the database
-        // 2. Notify the assigned driver that they've been removed
-        // 3. Broadcast to all available drivers that the call is available
-        // 4. Notify all dispatchers about the change
-        if (signalRConnection) {
-          console.log('Reassigning call via SignalR:', callId);
-          await signalRConnection.invoke("CallDriverCancelled", callId);
-        } else {
-          console.warn('SignalR not connected, cannot reassign call');
-          alert('SignalR not connected. Please refresh the page and try again.');
-          return;
+    showAlert(
+      'Reassign Call',
+      'Are you sure you want to reassign this call? The driver will be removed and the call will become available again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reassign',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Use SignalR to notify about reassignment - this will:
+              // 1. Update the database
+              // 2. Notify the assigned driver that they've been removed
+              // 3. Broadcast to all available drivers that the call is available
+              // 4. Notify all dispatchers about the change
+              if (signalRConnection && signalRConnection.state === 'Connected') {
+                console.log('Reassigning call via SignalR:', callId);
+                await signalRConnection.invoke("CallDriverCancelled", callId);
+              } else {
+                const state = signalRConnection?.state || 'Not initialized';
+                console.warn('SignalR not connected, state:', state);
+                showAlert('Connection Error', `SignalR not connected (${state}). Please refresh the page and try again.`, [{ text: 'OK' }], 'error');
+                return;
+              }
+
+              showToast('Call reassigned successfully', 'success');
+              window.location.reload();
+
+            } catch (error) {
+              console.error('Failed to reassign call:', error);
+              showAlert('Error', `Failed to reassign call: ${error.message}`, [{ text: 'OK' }], 'error');
+            }
+          }
         }
+      ],
+      'warning'
+    );
+  };
 
-        alert('Call reassigned successfully');
-        window.location.reload();
+  const handleResetPickupTime = async (callId) => {
+    showAlert(
+      'Reset Pickup Time',
+      'Are you sure you want to reset the pickup time for this call? The driver will be notified.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (signalRConnection && signalRConnection.state === 'Connected') {
+                console.log('Resetting pickup time via SignalR:', callId);
+                await signalRConnection.invoke("ResetPickupTime", callId);
+              } else {
+                const state = signalRConnection?.state || 'Not initialized';
+                console.warn('SignalR not connected, state:', state);
+                showAlert('Connection Error', `SignalR not connected (${state}). Please refresh the page and try again.`, [{ text: 'OK' }], 'error');
+                return;
+              }
 
-      } catch (error) {
-        console.error('Failed to reassign call:', error);
-        alert('Failed to reassign call. Please try again.');
-      }
-    }
+              showToast('Pickup time reset and driver notified', 'success');
+              // Refresh the data
+              window.location.reload();
+
+            } catch (error) {
+              console.error('Failed to reset pickup time:', error);
+              showAlert('Error', `Failed to reset pickup time: ${error.message}`, [{ text: 'OK' }], 'error');
+            }
+          }
+        }
+      ],
+      'warning'
+    );
   };
 
   const handleMessageDriver = (driverId, driverName, ride = null) => {
     // If messaging from a ride, determine the correct driver ID
     // If ride.Reassigned is true, use ride.ReassignedToId, else use ride.AssignedToId
     let targetDriverId = driverId;
-    let targetDriverName = driverName;
-    let rideContext = null;
 
     if (ride) {
       targetDriverId = ride.reassigned ? ride.reassignedToId : ride.assignedToId;
-      targetDriverName = ride.reassigned
-        ? (ride.reassignedTo?.name || `Driver #${ride.reassignedToId}`)
-        : (ride.assignedTo?.name || `Driver #${ride.assignedToId}`);
-
-      // Set ride context for message prefix
-      rideContext = {
-        rideId: ride.rideId,
-        customerName: ride.customerName,
-        customerPhone: ride.customerPhoneNumber
-      };
     }
 
     // Mark messages from this driver as read
@@ -197,10 +268,20 @@ const MetricListView = ({
       onMarkMessagesRead(targetDriverId);
     }
 
-    setMessagingDriverId(targetDriverId);
-    setMessagingDriverName(targetDriverName || `Driver #${targetDriverId}`);
-    setMessagingRideContext(rideContext);
-    setShowMessaging(true);
+    // Use the openMessagingModal function passed from parent if available
+    if (openMessagingModal) {
+      openMessagingModal(targetDriverId);
+    } else {
+      // Fallback to old approach (shouldn't happen)
+      setMessagingDriverId(targetDriverId);
+      setMessagingDriverName(driverName || `Driver #${targetDriverId}`);
+      setMessagingRideContext(ride ? {
+        rideId: ride.rideId,
+        customerName: ride.customerName,
+        customerPhone: ride.customerPhoneNumber
+      } : null);
+      setShowMessaging(true);
+    }
   };
 
   const handleMessagingClose = () => {
@@ -208,6 +289,91 @@ const MetricListView = ({
     setMessagingDriverId(null);
     setMessagingDriverName('');
     setMessagingRideContext(null);
+
+    // Notify parent that modal is closed
+    if (onMessagingModalClose) {
+      onMessagingModalClose();
+    }
+  };
+
+  const handleEditPrice = (rideId, currentPrice, currentDriverComp) => {
+    setEditingPriceRideId(rideId);
+    setEditedPrice(currentPrice.toString());
+    setEditedDriverComp(currentDriverComp.toString());
+  };
+
+  const handleCancelEditPrice = () => {
+    setEditingPriceRideId(null);
+    setEditedPrice('');
+    setEditedDriverComp('');
+  };
+
+  const handleSavePrice = async (rideId) => {
+    const newPrice = parseFloat(editedPrice);
+    const newDriverComp = parseFloat(editedDriverComp);
+
+    if (isNaN(newPrice) || newPrice < 0) {
+      showAlert('Error', 'Please enter a valid price', [{ text: 'OK' }], 'error');
+      return;
+    }
+
+    if (isNaN(newDriverComp) || newDriverComp < 0) {
+      showAlert('Error', 'Please enter a valid driver compensation', [{ text: 'OK' }], 'error');
+      return;
+    }
+
+    try {
+      await ridesAPI.updatePrice(rideId, newPrice, newDriverComp);
+
+      // Update local data
+      setData(prevData =>
+        prevData.map(ride =>
+          ride.rideId === rideId ? { ...ride, cost: newPrice, driversCompensation: newDriverComp } : ride
+        )
+      );
+
+      showToast('Price updated successfully', 'success');
+      setEditingPriceRideId(null);
+      setEditedPrice('');
+      setEditedDriverComp('');
+    } catch (error) {
+      console.error('Error updating price:', error);
+      showAlert('Error', 'Failed to update price. Please try again.', [{ text: 'OK' }], 'error');
+    }
+  };
+
+  const handleCancelRecurring = async (rideId) => {
+    showAlert(
+      'Cancel Recurring Ride',
+      'This will stop this ride from recurring in the future. The current instance will remain. Continue?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Yes, Cancel Series',
+          onPress: async () => {
+            try {
+              await ridesAPI.cancelRecurring(rideId);
+
+              // Update local data to mark as no longer recurring
+              setData(prevData =>
+                prevData.map(ride =>
+                  ride.rideId === rideId ? { ...ride, isRecurring: false } : ride
+                )
+              );
+
+              showToast('Recurring ride series canceled', 'success');
+            } catch (error) {
+              console.error('Error canceling recurring ride:', error);
+              showAlert('Error', 'Failed to cancel recurring ride. Please try again.', [{ text: 'OK' }], 'error');
+            }
+          }
+        }
+      ],
+      'warning'
+    );
   };
 
   const getTitle = () => {
@@ -218,14 +384,14 @@ const MetricListView = ({
         return 'Rides in Progress';
       case 'openRides':
         return 'Open Rides';
-      case 'futureRides':
-        return 'Future Rides';
+      case 'recurringRidesThisWeek':
+        return 'Recurring Rides This Week';
       case 'todaysRides':
         return 'Today\'s Rides';
       case 'activeDrivers':
         return 'Active Drivers';
-      case 'driversCurrentlyDriving':
-        return 'Drivers Currently Driving';
+      case 'driversOnJob':
+        return 'Drivers On Job';
       default:
         return 'List View';
     }
@@ -283,6 +449,7 @@ const MetricListView = ({
   const renderRideItem = (ride) => {
     const status = getRideStatus(ride);
     console.log(status);
+    console.log('recurring:', ride.isRecurring, ride.recurringId);
     return (
       <Card
         key={ride.rideId}
@@ -323,70 +490,154 @@ const MetricListView = ({
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography variant="h6" color="primary">
-              RideId {ride.rideId}
+              Ride Id #{ride.rideId}
             </Typography>
             <Chip
-              label={getRideStatus(ride)}
-              color={getRideStatusColor(getRideStatus(ride))}
+              label={status}
+              color={getRideStatusColor(status)}
               size="small"
+              sx={getRideStatusStyle(status)}
             />
           </Box>
 
           <Grid container spacing={2}>
             <Grid item xs={12}>
               {ride.customerName && <Typography variant="body2" color="text.secondary">
-                <strong>Customer:</strong> {ride.customerName}
+                👨‍👩‍👧‍👦 <strong>Customer:</strong> {ride.customerName}
               </Typography>}
-              {ride.customerName && <Typography variant="body2" color="text.secondary">
-                <strong>Customer #:</strong> {ride.customerPhoneNumber}
+              {ride.customerPhoneNumber && <Typography variant="body2" color="text.secondary">
+                ☎️ <strong>Phone #:</strong> {ride.customerPhoneNumber}
               </Typography>}
-              <Typography variant="body2" color="text.secondary">
-                <strong>Passengers:</strong> {ride.passengers || 1}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                <strong>Car Type:</strong> {['Car', 'SUV', 'MiniVan', '12 Passenger', '15 Passenger', 'Luxury SUV'][ride.carType] || 'Car'}
-              </Typography>
             </Grid>
-            <Grid item xs={12}>
-              <Box display="flex" alignItems="flex-start" gap={1}>
-                <LocationIcon fontSize="small" color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    <strong>From:</strong> {ride.route.pickup}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    <strong>To:</strong> {ride.route.dropOff}
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-            {ride.assignedToId && (
+
+            {/* Driver section */}
+            {((!ride.reassigned && ride.assignedToId) || ride.reassignedToId) && (
               <Grid item xs={12}>
                 <Typography variant="body2" color="text.secondary">
-                  <strong>Driver:</strong> #{ride.reassigned ? ride.reassignedToId : ride.assignedToId} - {ride.reassigned ? ride.reassignedTo?.name : ride.assignedTo?.name}
+                  🚘 <strong>Driver:</strong> #{ride.reassigned ? ride.reassignedToId : ride.assignedToId} - {ride.reassigned ? ride.reassignedTo?.name : ride.assignedTo?.name}
                 </Typography>
                 {(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber) && (
                   <Typography variant="body2" color="text.secondary">
-                    <strong>Driver Phone:</strong> {ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber}
+                    ☎️ <strong>Driver Phone #:</strong> {ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber}
                   </Typography>
                 )}
               </Grid>
             )}
-            {ride.scheduledFor && (
+
+            {/* Cost and Driver's Compensation - Admin Only */}
+            {isAdmin && (
               <Grid item xs={12}>
+                {editingPriceRideId === ride.rideId ? (
+                  <Box display="flex" flexDirection="column" gap={1}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <TextField
+                        size="small"
+                        type="number"
+                        value={editedPrice}
+                        onChange={(e) => setEditedPrice(e.target.value)}
+                        label="Cost"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                        }}
+                        sx={{ width: '150px' }}
+                        autoFocus
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        value={editedDriverComp}
+                        onChange={(e) => setEditedDriverComp(e.target.value)}
+                        label="Driver Comp"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                        }}
+                        sx={{ width: '150px' }}
+                      />
+                      <IconButton
+                        size="small"
+                        color="primary"
+                        onClick={() => handleSavePrice(ride.rideId)}
+                      >
+                        <CheckIcon />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={handleCancelEditPrice}
+                      >
+                        <CloseIcon />
+                      </IconButton>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Box>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body2" color="text.secondary">
+                        💵 <strong>Cost:</strong> ${ride.cost || 0}
+                      </Typography>
+                      {!ride.dropOffTime && (
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditPrice(ride.rideId, ride.cost || 0, ride.driversCompensation || 0)}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      💰 <strong>Driver Comp:</strong> ${ride.driversCompensation || 0}
+                    </Typography>
+                  </Box>
+                )}
+              </Grid>
+            )}
+
+
+            {/* Times section */}
+            <Grid item xs={12}>
+              {ride.callTime && (
                 <Typography variant="body2" color="text.secondary">
-                  <strong>Scheduled:</strong> {formatDateTime(ride.scheduledFor)}
+                  📞 <strong>Call Time:</strong> {formatDateTime(ride.callTime)}
+                </Typography>
+              )}
+              {ride.scheduledFor && (
+                <Typography variant="body2" color="text.secondary">
+                  🗓️ <strong>Scheduled:</strong> {formatDateTime(ride.scheduledFor)}
+                </Typography>
+              )}
+
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body2" color={ride.pickupTime ? "success.main" : "error.main"}>
+                <strong>Picked Up?</strong> {ride.pickupTime ? '✅' : '❌'}
+              </Typography>
+
+              <Typography variant="body2" color={ride.dropOffTime ? "success.main" : "error.main"}>
+                <strong>Dropped Off?</strong> {ride.dropOffTime ? '✅' : '❌'}
+              </Typography>
+            </Grid>
+
+            {/* Canceled indicator */}
+            {ride.canceled && (
+              <Grid item xs={12}>
+                <Typography variant="body2" color="error.main">
+                  ❌ <strong>Canceled</strong>
                 </Typography>
               </Grid>
             )}
-            {ride.callTime && (
+
+            {/* Recurring indicator */}
+            {ride.isRecurring && (
               <Grid item xs={12}>
-                <Typography variant="body2" color="text.secondary">
-                  <strong>Call Time:</strong> {formatDateTime(ride.callTime)}
-                </Typography>
+                <Box display="flex" alignItems="center" gap={0.5}>
+                  <RepeatIcon fontSize="small" color="primary" />
+                  <Typography variant="body2" color="primary.main">
+                    <strong>Recurring Ride</strong>
+                  </Typography>
+                </Box>
               </Grid>
             )}
           </Grid>
+
         </CardContent>
 
         <CardActions sx={{ flexWrap: 'wrap', gap: 1, p: 2, pt: 0 }}>
@@ -400,7 +651,7 @@ const MetricListView = ({
 
           {/* Show Message button for all non-canceled rides that aren't completed (dropOffTime is null) */}
           {/* Use reassigned driver if ride was reassigned */}
-          {(!ride.canceled && !ride.dropOffTime && ((ride.reassigned && ride.reassignedToId) || ride.assignedToId)) && (
+          {(!ride.canceled && !ride.dropOffTime && ((!ride.reassigned && ride.assignedToId) || ride.reassignedToId)) && (
             <Button
               variant="outlined"
               size="small"
@@ -422,6 +673,7 @@ const MetricListView = ({
               Cancel
             </Button>
           )}
+
           {(!ride.canceled && ((!ride.reassigned && ride.assignedToId) ||
             (ride.reassigned && ride.reassignedToId)) && !ride.pickupTime) && (
 
@@ -434,6 +686,32 @@ const MetricListView = ({
                 Reassign
               </Button>
             )}
+
+          {(ride.pickupTime && !ride.dropOffTime) && (
+
+            <Button
+              variant="outlined"
+              size="small"
+              color='error'
+              startIcon={<ResetIcon />}
+              onClick={() => handleResetPickupTime(ride.rideId)}
+            >
+              Reset Pickup Time
+            </Button>
+          )}
+
+          {/* Cancel Recurring button - only show for recurring rides */}
+          {ride.isRecurring && !ride.canceled && !ride.dropOffTime && (
+            <Button
+              variant="outlined"
+              size="small"
+              color="warning"
+              startIcon={<RepeatIcon />}
+              onClick={() => handleCancelRecurring(ride.rideId)}
+            >
+              Cancel Recurring
+            </Button>
+          )}
         </CardActions>
       </Card >
     )
@@ -441,7 +719,7 @@ const MetricListView = ({
 
   const renderDriverItem = (driver) => {
     const status = driverStatuses[driver.id] || 'loading';
-    const hasUnread = driversWithUnread.has(driver.id);
+    const unreadCount = driversWithUnread.get(driver.id) || 0;
 
     return (
       <Card key={driver.id} sx={{ mb: 2 }}>
@@ -449,9 +727,9 @@ const MetricListView = ({
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Box display="flex" alignItems="center" gap={1}>
               <Typography variant="h6" color="primary">
-                DriverId {driver.id}
+                Driver Id #{driver.id}
               </Typography>
-              {hasUnread && (
+              {!!unreadCount && (
                 <Badge color="error" variant="dot">
                   <UnreadIcon color="error" fontSize="small" />
                 </Badge>
@@ -461,36 +739,31 @@ const MetricListView = ({
               label={status}
               color={getDriverStatusColor(status)}
               size="small"
+              sx={getRideStatusStyle(status)}
             />
           </Box>
 
           <Grid container spacing={2}>
             <Grid item xs={12}>
               <Typography variant="body2" color="text.secondary">
-                <strong>Name:</strong> {driver.name}
+                🙎‍♂️ <strong>Name:</strong> {driver.name}
               </Typography>
             </Grid>
             <Grid item xs={12}>
-              <Box display="flex" alignItems="center" gap={1}>
-                <PhoneIcon fontSize="small" color="action" />
-                <Typography variant="body2" color="text.secondary">
-                  {driver.phoneNumber}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={12}>
-              <Box display="flex" alignItems="center" gap={1}>
-                <EmailIcon fontSize="small" color="action" />
-                <Typography variant="body2" color="text.secondary">
-                  {driver.email}
-                </Typography>
-              </Box>
-            </Grid>
-            {/* <Grid item xs={12}>
               <Typography variant="body2" color="text.secondary">
-                <strong>Currently Driving:</strong> {driver.isCurrentlyDriving ? 'Yes' : 'No'}
+                ☎️ <strong>Phone #:</strong> {driver.phoneNumber}
               </Typography>
-            </Grid> */}
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">
+                📧 <strong>Email:</strong> {driver.email}
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">
+                🚗 Has  {driver.cars?.length ?? 0} Car{driver.cars?.length === 1 ? '' : 's'}
+              </Typography>
+            </Grid>
           </Grid>
         </CardContent>
 
@@ -503,23 +776,20 @@ const MetricListView = ({
             View Details
           </Button>
 
-          <Button
-            variant={hasUnread ? "contained" : "outlined"}
-            size="small"
-            color={hasUnread ? "error" : "primary"}
-            startIcon={
-              hasUnread ? (
-                <Badge color="error" variant="dot">
-                  <MessageIcon />
-                </Badge>
-              ) : (
-                <MessageIcon />
-              )
-            }
-            onClick={() => handleMessageDriver(driver.id, driver.name)}
+          <Badge
+            badgeContent={unreadCount}
+            color="error"
+            max={99}
           >
-            {hasUnread ? "New Message!" : "Message Driver"}
-          </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<MessageIcon />}
+              onClick={() => handleMessageDriver(driver.id, driver.name)}
+            >
+              Message Driver
+            </Button>
+          </Badge>
         </CardActions>
       </Card>
     )
@@ -593,9 +863,9 @@ const MetricListView = ({
 
       {/* Driver Messaging Modal */}
       <DriverMessagingModal
-        isOpen={showMessaging}
+        isOpen={showMessaging || !!openMessagingDriverId}
         onClose={handleMessagingClose}
-        driverId={messagingDriverId}
+        driverId={openMessagingDriverId || messagingDriverId}
         driverName={messagingDriverName}
         rideContext={messagingRideContext}
         onNavigateToRideHistory={onNavigateToRideHistory}

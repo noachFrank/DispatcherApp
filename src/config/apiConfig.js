@@ -15,7 +15,12 @@ const config = {
     },
     USER: {
       GET_PROFILE: '/api/user/profile',
-      IS_ADMIN: '/api/User/isAdmin'
+      IS_ADMIN: '/api/User/isAdmin',
+      FIRE_DRIVER: '/api/User/FireDriver',
+      FIRE_DISPATCHER: '/api/User/FireDispatcher',
+      GET_FIRED_WORKERS: '/api/User/GetFiredWorkers',
+      UPDATE_PASSWORD: '/api/user/UpdatePassword',
+      FORGOT_PASSWORD: '/api/user/ForgotPassword'
     },
     RIDES: {
       CREATE: '/api/Ride/AddRide',
@@ -32,10 +37,24 @@ const config = {
       // DELETE: '/api/rides',
       ASSIGN: '/api/Ride/AssignToDriver',
       CANCEL: '/api/Ride/CancelRide',
+      CANCEL_RECURRING: '/api/Ride/CancelRecurring',
       REASSIGN: '/api/Ride/Reassign',
       PICKUP: '/api/Ride/Pickup',
       DROPOFF: '/api/Ride/Dropoff',
-      UPDATE_STATUS: '/api/Ride/UpdateStatus'
+      UPDATE_STATUS: '/api/Ride/UpdateStatus',
+      CALCULATE_PRICE: '/api/Ride/CalculatePrice',
+      RESET_PICKUP: '/api/Ride/ResetPickupTime',
+      UPDATE_PRICE: '/api/Ride/UpdatePrice'
+    },
+    DASHBOARD: {
+      GET_ALL: '/api/Ride/Dashboard',
+      ASSIGNED_RIDES: '/api/Ride/Dashboard/AssignedRides',
+      OPEN_RIDES: '/api/Ride/Dashboard/OpenRides',
+      RIDES_IN_PROGRESS: '/api/Ride/Dashboard/RidesInProgress',
+      RECURRING_RIDES_THIS_WEEK: '/api/Ride/Dashboard/RecurringRidesThisWeek',
+      TODAYS_RIDES: '/api/Ride/Dashboard/TodaysRides',
+      ACTIVE_DRIVERS: '/api/User/Dashboard/ActiveDrivers',
+      DRIVERS_ON_JOB: '/api/User/Dashboard/DriversOnJob'
     },
     DRIVERS: {
       GET_ALL: '/api/User/AllDrivers',
@@ -89,6 +108,13 @@ const apiClient = axios.create({
 // JWT Token Management
 const TOKEN_KEY = 'dispatch_jwt_token';
 
+// Global reference to AuthContext's forceLogout function
+let globalForceLogout = null;
+
+export const setForceLogoutCallback = (callback) => {
+  globalForceLogout = callback;
+};
+
 export const tokenManager = {
   getToken: () => {
     return localStorage.getItem(TOKEN_KEY);
@@ -122,7 +148,9 @@ apiClient.interceptors.request.use(
       console.log('API Request:', {
         method: config.method?.toUpperCase(),
         url: config.url,
-        hasToken: !!token
+        hasToken: !!token,
+        authorization: config.headers.Authorization,
+        body: config.data
       });
     }
 
@@ -150,9 +178,37 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Handle 401 Unauthorized - token expired or invalid
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Log error details FIRST (persists in console even after redirect)
+    console.error('=== API ERROR DETAILS ===');
+    console.error('Status:', error.response?.status);
+    console.error('Message:', error.message);
+    console.error('URL:', error.config?.url);
+    console.error('Full URL:', `${error.config?.baseURL}${error.config?.url}`);
+    console.error('Response Data:', error.response?.data);
+    console.error('Request Data:', error.config?.data);
+    console.error('========================');
+
+    // Don't try to refresh token on login endpoint (401 means invalid credentials)
+    const isLoginEndpoint = error.config?.url?.includes('/login');
+
+    // Handle 401 Unauthorized - token expired or invalid (but not on login page)
+    if (error.response?.status === 401 && !originalRequest._retry && !isLoginEndpoint) {
       originalRequest._retry = true;
+
+      // Only try to refresh if we have a token
+      const currentToken = tokenManager.getToken();
+      if (!currentToken) {
+        console.error('No token available - cannot refresh');
+        // Force logout since we have no token
+        if (globalForceLogout) {
+          await globalForceLogout();
+        }
+        // Redirect to login if not already there
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
+      }
 
       // Try to refresh token
       try {
@@ -161,7 +217,7 @@ apiClient.interceptors.response.use(
           {},
           {
             headers: {
-              Authorization: `Bearer ${tokenManager.getToken()}`
+              Authorization: `Bearer ${currentToken}`
             }
           }
         );
@@ -172,20 +228,22 @@ apiClient.interceptors.response.use(
           return apiClient(originalRequest);
         }
       } catch (refreshError) {
-        // Refresh failed - clear token and redirect to login
+        // Refresh failed - clear token and force logout
+        console.error('Token refresh failed - logging out');
         tokenManager.removeToken();
-        window.location.href = '/login';
+
+        // Call forceLogout if available to update UI state
+        if (globalForceLogout) {
+          await globalForceLogout();
+        }
+
+        // Only redirect if NOT already on login page
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       }
     }
-
-    // Log error details
-    console.error('API Error:', {
-      status: error.response?.status,
-      message: error.message,
-      url: error.config?.url,
-      data: error.response?.data
-    });
 
     return Promise.reject(error);
   }

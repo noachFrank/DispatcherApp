@@ -45,6 +45,8 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { messagesAPI } from '../services/apiService';
+import soundService from '../services/soundService';
+import { useAlert } from '../contexts/AlertContext';
 
 const BroadcastMessagingModal = ({
     isOpen,
@@ -57,7 +59,7 @@ const BroadcastMessagingModal = ({
     const [sending, setSending] = useState(false);
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
-
+    const { showAlert } = useAlert();
     /**
      * Fetch broadcast messages when modal opens
      */
@@ -141,9 +143,12 @@ const BroadcastMessagingModal = ({
             setMessages(prev => [...prev, sentMessage]);
             console.log('Broadcast message sent successfully');
 
+            // Play sound notification for broadcast sent
+            soundService.playBroadcastSentSound();
+
         } catch (error) {
             console.error('Error sending broadcast:', error);
-            alert('Failed to send broadcast. Please try again.');
+            showAlert('Error', 'Failed to send broadcast. Please try again.', [{ text: 'OK' }], 'error');
             setNewMessage(messageText); // Restore message on error
         } finally {
             setSending(false);

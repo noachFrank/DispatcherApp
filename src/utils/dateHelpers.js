@@ -1,15 +1,8 @@
-/**
- * Centralized date/time formatting utilities
- * All date display functions should use these helpers to ensure consistent formatting
- */
-
-/**
- * Format a date string to display time only (e.g., "2:30 PM")
- */
 export const formatTime = (dateString) => {
     if (!dateString) return '--';
     try {
-        const date = new Date(dateString);
+        const utcString = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+        const date = new Date(utcString);
         return date.toLocaleTimeString('en-US', {
             hour: 'numeric',
             minute: '2-digit',
@@ -26,7 +19,8 @@ export const formatTime = (dateString) => {
 export const formatDateTime = (dateString) => {
     if (!dateString) return '--';
     try {
-        const date = new Date(dateString);
+        const utcString = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+        const date = new Date(utcString);
         return date.toLocaleString('en-US', {
             month: 'short',
             day: 'numeric',
@@ -45,7 +39,8 @@ export const formatDateTime = (dateString) => {
 export const formatDate = (dateString) => {
     if (!dateString) return '--';
     try {
-        const date = new Date(dateString);
+        const utcString = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+        const date = new Date(utcString);
         return date.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
@@ -57,12 +52,30 @@ export const formatDate = (dateString) => {
 };
 
 /**
+ * Format a TimeOnly string (HH:mm:ss) to 12-hour format (e.g., "2:30 PM")
+ */
+export const formatTimeOnly = (timeString) => {
+    if (!timeString) return '--';
+    try {
+        // Parse time string (format: "HH:mm:ss" or "HH:mm")
+        const [hours, minutes] = timeString.split(':').map(Number);
+        const period = hours >= 12 ? 'PM' : 'AM';
+        const hour12 = hours % 12 || 12; // Convert 0 to 12, keep 1-11, convert 13-23
+        const minuteStr = minutes.toString().padStart(2, '0');
+        return `${hour12}:${minuteStr} ${period}`;
+    } catch {
+        return '--';
+    }
+};
+
+/**
  * Format a date string for day label (Today, Tomorrow, or weekday name)
  */
 export const formatDayLabel = (dateString) => {
     if (!dateString) return '';
 
-    const scheduledDate = new Date(dateString);
+    const utcString = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+    const scheduledDate = new Date(utcString);
     const today = new Date();
     const tomorrow = new Date();
     tomorrow.setDate(today.getDate() + 1);

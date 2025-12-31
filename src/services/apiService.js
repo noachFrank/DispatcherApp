@@ -5,7 +5,7 @@ export const authAPI = {
   login: async (userType, username, password) => {
     const response = await apiClient.post(config.ENDPOINTS.AUTH.LOGIN, {
       userType: userType,
-      NameOrEmail: username,
+      nameOrEmail: username,
       password: password
     });
 
@@ -115,6 +115,11 @@ export const ridesAPI = {
     return response.data;
   },
 
+  cancelRecurring: async (rideId) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.CANCEL_RECURRING, rideId);
+    return response.data;
+  },
+
   reassign: async (reassignData) => {
     const response = await apiClient.post(config.ENDPOINTS.RIDES.REASSIGN, reassignData);
     return response.data;
@@ -132,6 +137,23 @@ export const ridesAPI = {
 
   updateStatus: async (statusData) => {
     const response = await apiClient.post(config.ENDPOINTS.RIDES.UPDATE_STATUS, statusData);
+    return response.data;
+  },
+
+  calculatePrice: async (priceRequest) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.CALCULATE_PRICE, priceRequest);
+    return response.data;
+  },
+  resetPickup: async (resetData) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.RESET_PICKUP, resetData);
+    return response.data;
+  },
+  updatePrice: async (rideId, amount, driversComp) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.UPDATE_PRICE, {
+      RideId: rideId,
+      Amount: amount,
+      DriversComp: driversComp
+    });
     return response.data;
   }
 };
@@ -174,7 +196,7 @@ export const driversAPI = {
   },
 
   update: async (driverData) => {
-    const response = await apiClient.put(config.ENDPOINTS.DRIVERS.UPDATE, driverData);
+    const response = await apiClient.post(config.ENDPOINTS.DRIVERS.UPDATE, driverData);
     return response.data;
   },
 
@@ -212,7 +234,7 @@ export const dispatchersAPI = {
   },
 
   update: async (dispatcherData) => {
-    const response = await apiClient.put(config.ENDPOINTS.DISPATCHERS.UPDATE, dispatcherData);
+    const response = await apiClient.post(config.ENDPOINTS.DISPATCHERS.UPDATE, dispatcherData);
     return response.data;
   },
 
@@ -284,6 +306,86 @@ export const userAPI = {
     const response = await apiClient.get(config.ENDPOINTS.USER.IS_ADMIN, {
       params: { userId }
     });
+    return response.data;
+  },
+
+  fireDriver: async (driverId) => {
+    const response = await apiClient.post(config.ENDPOINTS.USER.FIRE_DRIVER, driverId, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
+  },
+
+  fireDispatcher: async (dispatcherId) => {
+    const response = await apiClient.post(config.ENDPOINTS.USER.FIRE_DISPATCHER, dispatcherId, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
+  },
+
+  getFiredWorkers: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.USER.GET_FIRED_WORKERS);
+    return response.data;
+  },
+
+  updatePassword: async (userId, oldPassword, newPassword) => {
+    const response = await apiClient.post(config.ENDPOINTS.USER.UPDATE_PASSWORD, {
+      userId,
+      userType: 'dispatcher',
+      oldPassword,
+      newPassword
+    });
+    return response.data;
+  },
+
+  forgotPassword: async (userId, userType = 'dispatcher') => {
+    const response = await apiClient.post(config.ENDPOINTS.USER.FORGOT_PASSWORD, {
+      userId,
+      userType
+    });
+    return response.data;
+  }
+};
+
+// Dashboard API
+export const dashboardAPI = {
+  getAll: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.GET_ALL);
+    return response.data;
+  },
+
+  getAssignedRides: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.ASSIGNED_RIDES);
+    return response.data;
+  },
+
+  getOpenRides: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.OPEN_RIDES);
+    return response.data;
+  },
+
+  getRidesInProgress: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.RIDES_IN_PROGRESS);
+    return response.data;
+  },
+
+  getRecurringRidesThisWeek: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.RECURRING_RIDES_THIS_WEEK);
+    return response.data;
+  },
+
+  getTodaysRides: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.TODAYS_RIDES);
+    return response.data;
+  },
+
+  getActiveDrivers: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.ACTIVE_DRIVERS);
+    return response.data;
+  },
+
+  getDriversOnJob: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.DRIVERS_ON_JOB);
     return response.data;
   }
 };

@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { authAPI } from '../services/apiService';
+import getEnvironmentConfig from '../config/environment';
+import { tokenManager, setForceLogoutCallback } from '../config/apiConfig';
 
 const AuthContext = createContext();
 
@@ -18,11 +20,42 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [signalRConnection, setSignalRConnection] = useState(null);
 
+  // Define forceLogout function
+  const forceLogout = async () => {
+    console.log('🔴 Force logout triggered (token invalid/expired)');
+    await stopSignalR();
+    setSignalRConnection(null);
+    setIsAuthenticated(false);
+    setUser(null);
+    localStorage.removeItem('dispatcherAuth');
+    tokenManager.removeToken();
+  };
+
+  // Register forceLogout with API config on mount
+  useEffect(() => {
+    setForceLogoutCallback(forceLogout);
+    return () => {
+      setForceLogoutCallback(null);
+    };
+  }, []);
+
   useEffect(() => {
     // Check if user is already logged in (e.g., from localStorage)
     const savedAuth = localStorage.getItem('dispatcherAuth');
     if (savedAuth) {
       const authData = JSON.parse(savedAuth);
+
+      // CRITICAL: Validate JWT token exists
+      const token = localStorage.getItem('dispatch_jwt_token');
+      if (!token || !authData.user?.token) {
+        console.error('⚠️ Auth data exists but JWT token is missing - logging out');
+        // Clear invalid auth state
+        localStorage.removeItem('dispatcherAuth');
+        localStorage.removeItem('dispatch_jwt_token');
+        setLoading(false);
+        return;
+      }
+
       setIsAuthenticated(true);
       setUser(authData.user);
       // Reinitialize SignalR for returning user
@@ -32,8 +65,16 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const initializeSignalR = async (dispatcherId) => {
+    const envConfig = getEnvironmentConfig;
+    const hubUrl = envConfig.SIGNALR_HUB_URL;
+
+    // Get JWT token from localStorage
+    const token = localStorage.getItem('dispatch_jwt_token');
+
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl('http://192.168.1.41:5062/hubs/dispatch')
+      .withUrl(hubUrl, {
+        accessTokenFactory: () => token || ''
+      })
       .withAutomaticReconnect()
       .configureLogging(signalR.LogLevel.Error) // Only show errors
       .build();
@@ -69,20 +110,31 @@ export const AuthProvider = ({ children }) => {
     try {
 
       const data = await authAPI.login('dispatcher', username, password);
+
+      // Handle new JWT response format
+      const userDetails = data.userDetails || data;
       const userData = {
-        username: data.userName || username,
-        role: data.role || 'dispatcher',
-        userId: data.userId || data.id,
+        username: userDetails.userName || username,
+        role: data.userType || 'dispatcher',
+        userId: data.userId || userDetails.id,
         token: data.token,
-        isAdmin: data.isAdmin || false,
-        name: data.name,
-        email: data.email,
-        phoneNumber: data.phoneNumber
+        isAdmin: data.isAdmin || userDetails.isAdmin || false,
+        name: data.name || userDetails.name,
+        email: userDetails.email,
+        phoneNumber: userDetails.phoneNumber
       };
 
       setIsAuthenticated(true);
       setUser(userData);
       localStorage.setItem('dispatcherAuth', JSON.stringify({ user: userData }));
+
+      // CRITICAL: Store JWT token separately for API requests
+      if (userData.token) {
+        localStorage.setItem('dispatch_jwt_token', userData.token);
+        console.log('JWT token stored for API requests');
+      } else {
+        console.error('⚠️ No token in login response!');
+      }
 
       // Initialize SignalR connection after successful login
       await initializeSignalR(userData.userId);
@@ -107,6 +159,8 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       setUser(null);
       localStorage.removeItem('dispatcherAuth');
+      // CRITICAL: Remove JWT token
+      tokenManager.removeToken();
       return true;
     } catch (error) {
       console.error('Logout failed:', error);
@@ -116,6 +170,8 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       setUser(null);
       localStorage.removeItem('dispatcherAuth');
+      // CRITICAL: Remove JWT token even on error
+      tokenManager.removeToken();
       return true;
     }
   };
@@ -126,7 +182,8 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     loading,
-    signalRConnection
+    signalRConnection,
+    forceLogout // For API interceptor to call (defined above)
   };
 
   return (

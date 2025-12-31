@@ -29,15 +29,18 @@ import {
     Cancel as CancelIcon,
     SwapHoriz as ReassignIcon,
     FilterList as FilterListIcon,
-    Close as CloseIcon
+    RestartAlt as ResetIcon,
+    Repeat as RepeatIcon
 } from '@mui/icons-material';
 import { ridesAPI, driversAPI } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { getRideStatus, getRideStatusColor } from '../utils/Status';
+import { useAlert } from '../contexts/AlertContext';
+import { getRideStatus, getRideStatusColor, getRideStatusStyle } from '../utils/Status';
 import DriverMessagingModal from './DriverMessagingModal';
 
-const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }) => {
+const RideHistory = ({ isAdmin = false, onItemClick, initialSearchQuery = '', onSearchQueryUsed }) => {
     const { signalRConnection } = useAuth();
+    const { showAlert, showToast } = useAlert();
     const navigate = useNavigate();
     const location = useLocation();
     const searchInputRef = useRef(null);
@@ -153,18 +156,7 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
         }
     }, [rides, loading, pendingSearchQuery, isFullHistory]);
 
-    useEffect(() => {
-        // Filter rides based on search query (ID only)
-        if (searchQuery.trim() === '') {
-            setFilteredRides(rides);
-        } else {
-            const query = searchQuery.toLowerCase().trim();
-            const filtered = rides.filter(ride =>
-                ride.rideId?.toString().toLowerCase() === query
-            );
-            setFilteredRides(filtered);
-        }
-    }, [searchQuery, rides]);
+    // Remove the separate search filter effect - it's now handled in the filter effect above
 
     // Fetch driver options for filter dropdown (example: from rides)
     useEffect(() => {
@@ -208,14 +200,33 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
                     // Load full history, then apply filter
                     await loadFullHistory();
                 }
-                setFilteredRides(getFilteredRidesByFilter());
+                // Apply advanced filter first
+                const filtered = getFilteredRidesByFilter();
+
+                // Then apply search query on top of filter results if there's a search
+                if (searchQuery.trim() !== '') {
+                    const query = searchQuery.toLowerCase().trim();
+                    setFilteredRides(filtered.filter(ride =>
+                        ride.rideId?.toString().toLowerCase() === query
+                    ));
+                } else {
+                    setFilteredRides(filtered);
+                }
             } else {
-                setFilteredRides(rides);
+                // No advanced filter, just apply search query if present
+                if (searchQuery.trim() !== '') {
+                    const query = searchQuery.toLowerCase().trim();
+                    setFilteredRides(rides.filter(ride =>
+                        ride.rideId?.toString().toLowerCase() === query
+                    ));
+                } else {
+                    setFilteredRides(rides);
+                }
             }
         }
         applyFilter();
         // Only re-run when filterApplied, rides, or filter logic changes
-    }, [filterApplied, rides, getFilteredRidesByFilter, isFullHistory]);
+    }, [filterApplied, rides, getFilteredRidesByFilter, isFullHistory, searchQuery]);
 
     const loadThisWeekRides = async () => {
         try {
@@ -267,46 +278,80 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
     };
 
     const handleCancelCall = async (rideId) => {
-        if (window.confirm('Are you sure you want to cancel this call?')) {
-            try {
-                await ridesAPI.cancel(rideId);
-                alert('Call cancelled successfully');
-                // Refresh the data
-                if (isFullHistory) {
-                    loadFullHistory();
-                } else {
-                    loadThisWeekRides();
+        showAlert(
+            'Cancel Call',
+            'Are you sure you want to cancel this call?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Confirm',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            if (signalRConnection && signalRConnection.state === 'Connected') {
+                                console.log('Cancelling call via SignalR:', rideId);
+                                await signalRConnection.invoke("CallCanceled", rideId);
+                            } else {
+                                const state = signalRConnection?.state || 'Not initialized';
+                                console.warn('SignalR not connected, state:', state);
+                                showAlert('Connection Error', `SignalR not connected (${state}). Please refresh the page and try again.`, [{ text: 'OK' }], 'error');
+                                return;
+                            }
+
+                            showToast('Call cancelled successfully', 'success');
+                            // Refresh the data
+                            if (isFullHistory) {
+                                loadFullHistory();
+                            } else {
+                                loadThisWeekRides();
+                            }
+                        } catch (error) {
+                            console.error('Failed to cancel call:', error);
+                            showAlert('Error', `Failed to cancel call: ${error.message}`, [{ text: 'OK' }], 'error');
+                        }
+                    }
                 }
-            } catch (error) {
-                console.error('Failed to cancel call:', error);
-                alert('Failed to cancel call. Please try again.');
-            }
-        }
+            ],
+            'warning'
+        );
     };
 
     const handleReassignCall = async (rideId) => {
-        if (window.confirm('Are you sure you want to reassign this call? The driver will be removed and the call will become available again.')) {
-            try {
-                if (signalRConnection) {
-                    console.log('Reassigning call via SignalR:', rideId);
-                    await signalRConnection.invoke("CallDriverCancelled", rideId);
-                } else {
-                    console.warn('SignalR not connected, cannot reassign call');
-                    alert('SignalR not connected. Please refresh the page and try again.');
-                    return;
-                }
+        showAlert(
+            'Reassign Call',
+            'Are you sure you want to reassign this call? The driver will be removed and the call will become available again.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Reassign',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            if (signalRConnection && signalRConnection.state === 'Connected') {
+                                console.log('Reassigning call via SignalR:', rideId);
+                                await signalRConnection.invoke("CallDriverCancelled", rideId);
+                            } else {
+                                const state = signalRConnection?.state || 'Not initialized';
+                                console.warn('SignalR not connected, state:', state);
+                                showAlert('Connection Error', `SignalR not connected (${state}). Please refresh the page and try again.`, [{ text: 'OK' }], 'error');
+                                return;
+                            }
 
-                alert('Call reassigned successfully');
-                if (isFullHistory) {
-                    loadFullHistory();
-                } else {
-                    loadThisWeekRides();
+                            showToast('Call reassigned successfully', 'success');
+                            if (isFullHistory) {
+                                loadFullHistory();
+                            } else {
+                                loadThisWeekRides();
+                            }
+                        } catch (error) {
+                            console.error('Failed to reassign call:', error);
+                            showAlert('Error', `Failed to reassign call: ${error.message}`, [{ text: 'OK' }], 'error');
+                        }
+                    }
                 }
-            } catch (error) {
-                console.error('Failed to reassign call:', error);
-                alert('Failed to reassign call. Please try again.');
-            }
-        }
+            ],
+            'warning'
+        );
     };
 
     const handleMessageDriver = (ride) => {
@@ -332,6 +377,82 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
         setMessagingDriverId(null);
         setMessagingDriverName('');
         setMessagingRideContext(null);
+    };
+
+
+    const handleResetPickupTime = async (callId) => {
+        showAlert(
+            'Reset Pickup Time',
+            'Are you sure you want to reset the pickup time for this call? The driver will be notified.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Reset',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            if (signalRConnection && signalRConnection.state === 'Connected') {
+                                console.log('Resetting pickup time via SignalR:', callId);
+                                await signalRConnection.invoke("ResetPickupTime", callId);
+
+                            } else {
+                                const state = signalRConnection?.state || 'Not initialized';
+                                console.warn('SignalR not connected, state:', state);
+                                showAlert('Connection Error', `SignalR not connected (${state}). Please refresh the page and try again.`, [{ text: 'OK' }], 'error');
+                                return;
+                            }
+
+                            showToast('Pickup time reset and driver notified', 'success');
+
+                            if (isFullHistory) {
+                                loadFullHistory();
+                            } else {
+                                loadThisWeekRides();
+                            }
+                        } catch (error) {
+                            console.error('Failed to reset pickup time:', error);
+                            showAlert('Error', `Failed to reset pickup time: ${error.message}`, [{ text: 'OK' }], 'error');
+                        }
+                    }
+                }
+            ],
+            'warning'
+        );
+    };
+
+
+    const handleCancelRecurring = async (rideId) => {
+        showAlert(
+            'Cancel Recurring Ride',
+            'This will stop this ride from recurring in the future. The current instance will remain. Continue?',
+            [
+                {
+                    text: 'Cancel',
+                    style: 'cancel'
+                },
+                {
+                    text: 'Yes, Cancel Series',
+                    onPress: async () => {
+                        try {
+                            await ridesAPI.cancelRecurring(rideId);
+
+                            // Update local data to mark as no longer recurring
+                            setData(prevData =>
+                                prevData.map(ride =>
+                                    ride.rideId === rideId ? { ...ride, isRecurring: false } : ride
+                                )
+                            );
+
+                            showToast('Recurring ride series canceled', 'success');
+                        } catch (error) {
+                            console.error('Error canceling recurring ride:', error);
+                            showAlert('Error', 'Failed to cancel recurring ride. Please try again.', [{ text: 'OK' }], 'error');
+                        }
+                    }
+                }
+            ],
+            'warning'
+        );
     };
 
     // Handle search query change - update state and URL
@@ -422,157 +543,76 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
                 <CardContent>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                         <Typography variant="h6" color="primary">
-                            RideId {ride.rideId}
+                            Ride Id #{ride.rideId}
                         </Typography>
                         <Chip
                             label={status}
                             color={getRideStatusColor(status)}
                             size="small"
+                            sx={getRideStatusStyle(status)}
                         />
                     </Box>
-
+                    {/* Customer Ride details grid */}
                     <Grid container spacing={2}>
                         <Grid item xs={12}>
                             {ride.customerName && <Typography variant="body2" color="text.secondary">
-                                <strong>Customer:</strong> {ride.customerName}
+                                👨‍👩‍👧‍👦 <strong>Customer:</strong> {ride.customerName}
                             </Typography>}
                             {ride.customerPhoneNumber && <Typography variant="body2" color="text.secondary">
-                                <strong>Phone #:</strong> {ride.customerPhoneNumber}
+                                ☎️ <strong>Phone #:</strong> {ride.customerPhoneNumber}
                             </Typography>}
-                            <Typography variant="body2" color="text.secondary">
-                                👥 <strong>Passengers:</strong> {ride.passengers || 1}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                🚗 <strong>Car Type:</strong> {['Car', 'SUV', 'MiniVan', '12 Passenger', '15 Passenger', 'Luxury SUV'][ride.carType] || 'Car'}
-                            </Typography>
                         </Grid>
 
-                        {/* Route with emoji icons */}
-                        <Grid item xs={12}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                        {/* Driver section */}
+                        {((!ride.reassigned && ride.assignedToId) || ride.reassignedToId) && (
+                            <Grid item xs={12}>
                                 <Typography variant="body2" color="text.secondary">
-                                    📍 <strong>Pickup:</strong> {ride.route?.pickup || 'N/A'}
+                                    🚘 <strong>Driver:</strong> #{ride.reassigned ? ride.reassignedToId : ride.assignedToId} - {ride.reassigned ? ride.reassignedTo?.name : ride.assignedTo?.name}
                                 </Typography>
-                                {/* Show stops if any */}
-                                {ride.route?.stop1 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 1:</strong> {ride.route.stop1}
+                                {(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber) && (
+                                    <Typography variant="body2" color="text.secondary">
+                                        ☎️ <strong>Driver Phone #:</strong> {ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber}
                                     </Typography>
                                 )}
-                                {ride.route?.stop2 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 2:</strong> {ride.route.stop2}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop3 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 3:</strong> {ride.route.stop3}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop4 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 4:</strong> {ride.route.stop4}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop5 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 5:</strong> {ride.route.stop5}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop6 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 6:</strong> {ride.route.stop6}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop7 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 7:</strong> {ride.route.stop7}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop8 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 8:</strong> {ride.route.stop8}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop9 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 9:</strong> {ride.route.stop9}
-                                    </Typography>
-                                )}
-                                {ride.route?.stop10 && (
-                                    <Typography variant="body2" color="text.secondary" sx={{ pl: 2 }}>
-                                        📌 <strong>Stop 10:</strong> {ride.route.stop10}
-                                    </Typography>
-                                )}
-                                <Typography variant="body2" color="text.secondary">
-                                    🏁 <strong>Dropoff:</strong> {ride.route?.dropOff || 'N/A'}
-                                </Typography>
-                                {ride.route?.roundTrip && (
-                                    <Typography variant="body2" color="primary" sx={{ fontStyle: 'italic' }}>
-                                        🔄 Round Trip
-                                    </Typography>
-                                )}
-                            </Box>
-                        </Grid>
+                            </Grid>
+                        )}
 
-                        {/* Cost and Driver's Compensation */}
-                        <Grid item xs={12}>
-                            <Box sx={{ display: 'flex', gap: 3 }}>
+                        {/* Cost and Driver's Compensation - Admin Only */}
+                        {isAdmin && (
+                            <Grid item xs={12}>
                                 <Typography variant="body2" color="text.secondary">
                                     💵 <strong>Cost:</strong> ${ride.cost || 0}
                                 </Typography>
                                 <Typography variant="body2" color="text.secondary">
                                     💰 <strong>Driver Comp:</strong> ${ride.driversCompensation || 0}
                                 </Typography>
-                            </Box>
-                        </Grid>
-
-                        {ride.assignedToId && (
-                            <Grid item xs={12}>
-                                <Typography variant="body2" color="text.secondary">
-                                    <strong>Driver:</strong> #{ride.reassigned ? ride.reassignedToId : ride.assignedToId} - {ride.reassigned ? ride.reassignedTo?.name : ride.assignedTo?.name}
-                                </Typography>
-                                {(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber) && (
-                                    <Typography variant="body2" color="text.secondary">
-                                        <strong>Driver Phone:</strong> {ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber}
-                                    </Typography>
-                                )}
                             </Grid>
                         )}
+
 
                         {/* Times section */}
                         <Grid item xs={12}>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                                {ride.scheduledFor && (
-                                    <Typography variant="body2" color="text.secondary">
-                                        🗓️ <strong>Scheduled:</strong> {formatDateTime(ride.scheduledFor)}
-                                    </Typography>
-                                )}
-                                {ride.callTime && (
-                                    <Typography variant="body2" color="text.secondary">
-                                        📞 <strong>Call Time:</strong> {formatDateTime(ride.callTime)}
-                                    </Typography>
-                                )}
-                            </Box>
-                        </Grid>
+                            {ride.callTime && (
+                                <Typography variant="body2" color="text.secondary">
+                                    📞 <strong>Call Time:</strong> {formatDateTime(ride.callTime)}
+                                </Typography>
+                            )}
+                            {ride.scheduledFor && (
+                                <Typography variant="body2" color="text.secondary">
+                                    🗓️ <strong>Scheduled:</strong> {formatDateTime(ride.scheduledFor)}
+                                </Typography>
+                            )}
 
-                        {/* Pickup and Dropoff Times (if completed) */}
-                        {(ride.pickupTime || ride.dropOffTime) && (
-                            <Grid item xs={12}>
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                                    {ride.pickupTime && (
-                                        <Typography variant="body2" color="success.main">
-                                            ✅ <strong>Picked Up:</strong> {formatDateTime(ride.pickupTime)}
-                                        </Typography>
-                                    )}
-                                    {ride.dropOffTime && (
-                                        <Typography variant="body2" color="success.main">
-                                            ✅ <strong>Dropped Off:</strong> {formatDateTime(ride.dropOffTime)}
-                                        </Typography>
-                                    )}
-                                </Box>
-                            </Grid>
-                        )}
+                        </Grid>
+                        <Grid item xs={12}>
+                            <Typography variant="body2" color={ride.pickupTime ? "success.main" : "error.main"}>
+                                <strong>Picked Up?</strong> {ride.pickupTime ? '✅' : '❌'}
+                            </Typography>
+
+                            <Typography variant="body2" color={ride.dropOffTime ? "success.main" : "error.main"}>
+                                <strong>Dropped Off?</strong> {ride.dropOffTime ? '✅' : '❌'}
+                            </Typography>
+                        </Grid>
 
                         {/* Canceled indicator */}
                         {ride.canceled && (
@@ -580,6 +620,18 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
                                 <Typography variant="body2" color="error.main">
                                     ❌ <strong>Canceled</strong>
                                 </Typography>
+                            </Grid>
+                        )}
+
+                        {/* Recurring indicator */}
+                        {ride.isRecurring && (
+                            <Grid item xs={12}>
+                                <Box display="flex" alignItems="center" gap={0.5}>
+                                    <RepeatIcon fontSize="small" color="primary" />
+                                    <Typography variant="body2" color="primary.main">
+                                        <strong>Recurring Ride</strong>
+                                    </Typography>
+                                </Box>
                             </Grid>
                         )}
                     </Grid>
@@ -629,6 +681,32 @@ const RideHistory = ({ onItemClick, initialSearchQuery = '', onSearchQueryUsed }
                                 Reassign
                             </Button>
                         )}
+
+                    {(ride.pickupTime && !ride.dropOffTime) && (
+
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            color='error'
+                            startIcon={<ResetIcon />}
+                            onClick={() => handleResetPickupTime(ride.rideId)}
+                        >
+                            Reset Pickup Time
+                        </Button>
+                    )}
+
+                    {/* Cancel Recurring button - only show for recurring rides */}
+                    {ride.isRecurring && !ride.canceled && !ride.dropOffTime && (
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            color="warning"
+                            startIcon={<RepeatIcon />}
+                            onClick={() => handleCancelRecurring(ride.rideId)}
+                        >
+                            Cancel Recurring
+                        </Button>
+                    )}
                 </CardActions>
             </Card>
         );

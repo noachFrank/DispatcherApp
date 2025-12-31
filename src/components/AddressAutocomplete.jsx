@@ -21,7 +21,7 @@ import { AUTOCOMPLETE_OPTIONS } from '../config/googleMapsConfig';
  * - required: Boolean for required field
  * - disabled: Boolean to disable the input
  */
-const AddressAutocomplete = ({
+const AddressAutocomplete = React.forwardRef(({
     label,
     value,
     onChange,
@@ -34,7 +34,7 @@ const AddressAutocomplete = ({
     margin = 'normal',
     fullWidth = true,
     size = 'medium'
-}) => {
+}, ref) => {
     const { isLoaded } = useGoogleMaps();
     const [inputValue, setInputValue] = useState(value || '');
     const [predictions, setPredictions] = useState([]);
@@ -42,7 +42,7 @@ const AddressAutocomplete = ({
     const [isLoading, setIsLoading] = useState(false);
     const autocompleteService = useRef(null);
     const placesService = useRef(null);
-    const inputRef = useRef(null);
+    const inputRef = ref || useRef(null);
     const containerRef = useRef(null);
 
     // Initialize Google services when API is loaded
@@ -235,6 +235,8 @@ const AddressAutocomplete = ({
             )}
         </Box>
     );
-};
+});
+
+AddressAutocomplete.displayName = 'AddressAutocomplete';
 
 export default AddressAutocomplete;
