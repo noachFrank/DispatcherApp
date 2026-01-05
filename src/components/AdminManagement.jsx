@@ -51,7 +51,7 @@ const AdminManagement = ({ onNavigateToRideHistory, openMessagingModal, openMess
     const tabs = ['dispatchers', 'drivers', 'fired'];
     const tab = tabs[newValue];
     setActiveTab(tab);
-    navigate(`/dashboard/admin?tab=${tab}`, { replace: true });
+    navigate(`/dispatch/admin?tab=${tab}`, { replace: true });
   };
 
   const checkAdminAccess = async () => {

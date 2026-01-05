@@ -44,7 +44,10 @@ const config = {
       UPDATE_STATUS: '/api/Ride/UpdateStatus',
       CALCULATE_PRICE: '/api/Ride/CalculatePrice',
       RESET_PICKUP: '/api/Ride/ResetPickupTime',
-      UPDATE_PRICE: '/api/Ride/UpdatePrice'
+      UPDATE_PRICE: '/api/Ride/UpdatePrice',
+      UNSETTLED_RIDES_BY_DRIVER: '/api/Ride/UnsettledRides',
+      SETTLE_DRIVER: '/api/Ride/SettleDriver',
+      SETTLE_RIDE: '/api/Ride/SettleRide'
     },
     DASHBOARD: {
       GET_ALL: '/api/Ride/Dashboard',
@@ -54,7 +57,8 @@ const config = {
       RECURRING_RIDES_THIS_WEEK: '/api/Ride/Dashboard/RecurringRidesThisWeek',
       TODAYS_RIDES: '/api/Ride/Dashboard/TodaysRides',
       ACTIVE_DRIVERS: '/api/User/Dashboard/ActiveDrivers',
-      DRIVERS_ON_JOB: '/api/User/Dashboard/DriversOnJob'
+      DRIVERS_ON_JOB: '/api/User/Dashboard/DriversOnJob',
+      UNSETTLED_DRIVERS: '/api/Ride/Dashboard/UnsettledDrivers'
     },
     DRIVERS: {
       GET_ALL: '/api/User/AllDrivers',

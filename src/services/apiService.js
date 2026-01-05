@@ -387,6 +387,30 @@ export const dashboardAPI = {
   getDriversOnJob: async () => {
     const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.DRIVERS_ON_JOB);
     return response.data;
+  },
+
+  getUnsettledDrivers: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.DASHBOARD.UNSETTLED_DRIVERS);
+    return response.data;
+  },
+
+  getUnsettledRidesByDriver: async (driverId) => {
+    const response = await apiClient.get(`${config.ENDPOINTS.RIDES.UNSETTLED_RIDES_BY_DRIVER}/${driverId}`);
+    return response.data;
+  },
+
+  settleDriver: async (driverId) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.SETTLE_DRIVER, driverId, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
+  },
+
+  settleRide: async (rideId) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.SETTLE_RIDE, rideId, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
   }
 };
 

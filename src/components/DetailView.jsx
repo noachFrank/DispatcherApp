@@ -196,22 +196,48 @@ const DetailView = ({ isAdmin = false, itemType, itemId, onBackToList }) => {
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              {<Typography variant="h6" gutterBottom color="primary">
+              <Typography variant="h6" gutterBottom color="primary">
                 Driver Information
-              </Typography>}
+              </Typography>
               <Grid item xs={12}>
-                {((!ride.reassigned && ride.assignedToId) || ride.reassignedToId) ? (
-                  <Grid item xs={12}>
-                    <Typography variant="body1" color="text.secondary">
-                      🚘 <strong>Driver:</strong> #{ride.reassigned ? ride.reassignedToId : ride.assignedToId} - {ride.reassigned ? ride.reassignedTo?.name : ride.assignedTo?.name}
-                    </Typography>
-                    {(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber) && (
-                      <Typography variant="body1" color="text.secondary">
-                        ☎️ <strong>Driver Phone #:</strong> {formatPhoneNumber(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber)}
-                      </Typography>
-                    )}
-                  </Grid>
-                ) : (
+                {((!ride.reassigned && ride.assignedToId) || ride.reassignedToId) ? (() => {
+                  const car = ride.reassigned
+                    ? ride.reassignedTo?.cars?.find(c => c.isPrimary)
+                    : ride.assignedTo?.cars?.find(c => c.isPrimary);
+                  return (
+                    <Grid container spacing={3} sx={{ mb: 2 }}>
+
+                      <Grid item xs={12}>
+                        <Typography variant="body1" color="text.secondary">
+                          🚘 <strong>Driver:</strong> #{ride.reassigned ? ride.reassignedToId : ride.assignedToId} - {ride.reassigned ? ride.reassignedTo?.name : ride.assignedTo?.name}
+                        </Typography>
+                        {(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber) && (
+                          <Typography variant="body1" color="text.secondary">
+                            ☎️ <strong>Driver Phone #:</strong> {formatPhoneNumber(ride.reassigned ? ride.reassignedTo?.phoneNumber : ride.assignedTo?.phoneNumber)}
+                          </Typography>
+                        )}
+                      </Grid>
+
+                      {
+                        (car &&
+                          <Grid item xs={12}>
+
+                            <Typography variant="body1" color="text.secondary">
+                              🚗 <strong>Car:</strong> {car.color} {car.make} {car.model} ({car.year})
+                            </Typography>
+                            <Typography variant="body1" color="text.secondary">
+                              💺 <strong>Car Type:</strong> {car.type === 'TwelvePass' ? '12-Passenger Van' :
+                                car.type === 'FifteenPass' ? '15-Passenger Van' :
+                                  car.type === 'MercSprinter' ? 'Sprinter Van' :
+                                    car.type === 'LuxurySUV' ? 'Luxury SUV' :
+                                      car.type} with {car.seats} seats
+                            </Typography>
+                          </Grid>
+                        )
+                      }
+                    </Grid>
+                  );
+                })() : (
                   <Typography variant="body1" color="text.secondary">
                     🚘 <strong>Unassigned</strong>
                   </Typography>

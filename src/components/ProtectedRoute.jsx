@@ -23,7 +23,8 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  // Redirect unauthenticated users to public landing page
+  return isAuthenticated ? children : <Navigate to="/" replace />;
 };
 
 export default ProtectedRoute;

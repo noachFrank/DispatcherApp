@@ -438,14 +438,14 @@ const MainDashboard = () => {
     setOpenMessagingDriverId(null);
 
     // First navigate to history
-    navigate('/dashboard/history');
+    navigate('/dispatch/history');
 
     // Then clean up the URL after a short delay to ensure navigation completes
     setTimeout(() => {
       const search = new URLSearchParams(window.location.search);
       search.delete('messagingDriverId');
       const searchString = search.toString();
-      const cleanUrl = `/dashboard/history${searchString ? '?' + searchString : ''}`;
+      const cleanUrl = `/dispatch/history${searchString ? '?' + searchString : ''}`;
       console.log('🔵 Cleaning URL to:', cleanUrl);
       navigate(cleanUrl, { replace: true });
     }, 50);
@@ -465,7 +465,7 @@ const MainDashboard = () => {
     setSelectedMetric(metricType);
     setSelectedMetricData(data);
     setCurrentView('list');
-    navigate(`/dashboard/list?metric=${metricType}`);
+    navigate(`/dispatch/list?metric=${metricType}`);
   };
 
   const handleItemClick = (itemType, itemId, context = null) => {
@@ -473,7 +473,7 @@ const MainDashboard = () => {
     setSelectedItemId(itemId);
     setDetailFromContext(context); // Store where we came from
     setCurrentView('detail');
-    navigate(`/dashboard/detail?type=${itemType}&id=${itemId}`);
+    navigate(`/dispatch/detail?type=${itemType}&id=${itemId}`);
   };
 
   const handleBackToDashboard = () => {
@@ -482,7 +482,7 @@ const MainDashboard = () => {
     setSelectedMetricData([]);
     setSelectedItemType(null);
     setSelectedItemId(null);
-    navigate('/dashboard');
+    navigate('/dispatch');
   };
 
   const handleBackToList = () => {
@@ -493,13 +493,13 @@ const MainDashboard = () => {
       setSelectedItemId(null);
       // Navigate back to history with the search query preserved
       const searchParam = detailFromContext.searchQuery ? `?search=${detailFromContext.searchQuery}` : '';
-      navigate(`/dashboard/history${searchParam}`);
+      navigate(`/dispatch/history${searchParam}`);
       setDetailFromContext(null);
     } else {
       setCurrentView('list');
       setSelectedItemType(null);
       setSelectedItemId(null);
-      navigate(`/dashboard/list?metric=${selectedMetric}`);
+      navigate(`/dispatch/list?metric=${selectedMetric}`);
     }
   };
 
@@ -513,7 +513,7 @@ const MainDashboard = () => {
 
   const handleNewCallCancel = () => {
     setCurrentView('dashboard');
-    navigate('/dashboard');
+    navigate('/dispatch');
   };
 
   const handleRecurringCallComplete = () => {
@@ -522,7 +522,7 @@ const MainDashboard = () => {
 
   const handleRecurringCallCancel = () => {
     setCurrentView('dashboard');
-    navigate('/dashboard');
+    navigate('/dispatch');
   };
 
   const handleShowNotifications = () => {
@@ -643,9 +643,9 @@ const MainDashboard = () => {
   return (
     <Box sx={{ flexGrow: 1, bgcolor: '#f5f7fa', minHeight: '100vh' }}>
       {/* Header */}
-      <AppBar position="static" sx={{ bgcolor: 'white', color: 'text.primary', boxShadow: 1 }}>
+      <AppBar position="sticky" sx={{ bgcolor: '#1a1a2e', color: 'white', boxShadow: 1 }}>
         <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: 'text.primary' }}>
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: 'white' }}>
             Dispatcher Dashboard
           </Typography>
 
@@ -654,15 +654,26 @@ const MainDashboard = () => {
               value={currentView}
               onChange={(e, newValue) => {
                 setCurrentView(newValue);
-                if (newValue === 'dashboard') navigate('/dashboard');
-                else if (newValue === 'newCall') navigate('/dashboard/new-call');
-                else if (newValue === 'recurringCall') navigate('/dashboard/recurring-call');
-                else if (newValue === 'admin') navigate('/dashboard/admin');
-                else if (newValue === 'reports') navigate('/dashboard/reports');
-                else if (newValue === 'history') navigate('/dashboard/history');
-                else if (newValue === 'tracking') navigate('/dashboard/tracking');
+                if (newValue === 'dashboard') navigate('/dispatch');
+                else if (newValue === 'newCall') navigate('/dispatch/new-call');
+                else if (newValue === 'recurringCall') navigate('/dispatch/recurring-call');
+                else if (newValue === 'admin') navigate('/dispatch/admin');
+                else if (newValue === 'reports') navigate('/dispatch/reports');
+                else if (newValue === 'history') navigate('/dispatch/history');
+                else if (newValue === 'tracking') navigate('/dispatch/tracking');
               }}
-              sx={{ minHeight: 'auto' }}
+              sx={{
+                minHeight: 'auto',
+                '& .MuiTab-root': {
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  '&.Mui-selected': {
+                    color: 'white',
+                  },
+                },
+                '& .MuiTabs-indicator': {
+                  backgroundColor: 'white',
+                },
+              }}
             >
               <Tab label="Dashboard" value="dashboard" />
               <Tab label="New Call" value="newCall" />
@@ -679,7 +690,7 @@ const MainDashboard = () => {
 
             <IconButton
               onClick={handleShowBroadcast}
-              color="primary"
+              sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
               title="Broadcast to All Drivers"
             >
               <CampaignIcon />
@@ -688,7 +699,7 @@ const MainDashboard = () => {
             <Tooltip title={soundEnabled ? "Sound notifications enabled" : "Sound notifications disabled"}>
               <IconButton
                 onClick={handleToggleSound}
-                color={soundEnabled ? "primary" : "default"}
+                sx={{ color: soundEnabled ? '#4fc3f7' : 'rgba(255, 255, 255, 0.5)' }}
               >
                 {soundEnabled ? <VolumeUpIcon /> : <VolumeOffIcon />}
               </IconButton>
@@ -696,21 +707,21 @@ const MainDashboard = () => {
 
             <IconButton
               onClick={handleShowNotifications}
-              color="primary"
+              sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
             >
               <Badge badgeContent={openMessagingDriverId ? unreadDriverMessages.filter(msg => msg.driverId !== openMessagingDriverId).length : notificationCount} color="error">
                 <NotificationsIcon />
               </Badge>
             </IconButton>
 
-            <Typography variant="body2" sx={{ mx: 2, color: 'text.secondary' }}>
+            <Typography variant="body2" sx={{ mx: 2, color: 'rgba(255, 255, 255, 0.7)' }}>
               Welcome, {user?.username}
             </Typography>
 
             <Tooltip title="Change Password">
               <IconButton
                 onClick={handleShowChangePassword}
-                color="primary"
+                sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
               >
                 <LockIcon />
               </IconButton>
@@ -718,7 +729,14 @@ const MainDashboard = () => {
 
             <Button
               onClick={handleLogout}
-              color="error"
+              sx={{
+                color: '#ff6b6b',
+                borderColor: '#ff6b6b',
+                '&:hover': {
+                  borderColor: '#ff5252',
+                  backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                },
+              }}
               startIcon={<LogoutIcon />}
               variant="outlined"
               size="small"

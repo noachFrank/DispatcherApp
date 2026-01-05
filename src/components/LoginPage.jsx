@@ -24,7 +24,7 @@ const LoginPage = () => {
 
   // Redirect if already authenticated
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/dispatch" replace />;
   }
 
   const handleSubmit = async (e) => {

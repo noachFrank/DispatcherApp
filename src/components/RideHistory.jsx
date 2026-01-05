@@ -107,7 +107,7 @@ const RideHistory = ({ isAdmin = false, onItemClick, initialSearchQuery = '', on
         } else {
             params.delete('search');
         }
-        navigate(`/dashboard/history?${params.toString()}`, { replace: true });
+        navigate(`/dispatch/history?${params.toString()}`, { replace: true });
     }, [navigate, location.search]);
 
     // Apply initial search query when it changes from prop

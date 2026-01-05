@@ -9,8 +9,8 @@ const environments = {
     DEBUG: true
   },
   production: {
-    API_BASE_URL: import.meta.env.VITE_API_BASE_URL_PROD || '',
-    SIGNALR_HUB_URL: import.meta.env.VITE_SIGNALR_HUB_URL_PROD || '',
+    API_BASE_URL: import.meta.env.VITE_API_BASE_URL_PROD || 'https://carserviceapp-api-a8h3fsftavdaajh2.centralus-01.azurewebsites.net',
+    SIGNALR_HUB_URL: import.meta.env.VITE_SIGNALR_HUB_URL_PROD || 'https://carserviceapp-api-a8h3fsftavdaajh2.centralus-01.azurewebsites.net/hubs/dispatch',
     DEBUG: false
   }
 };

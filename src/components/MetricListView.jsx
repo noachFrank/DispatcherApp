@@ -12,7 +12,16 @@ import {
   Paper,
   TextField,
   InputAdornment,
-  Badge
+  Badge,
+  Collapse,
+  CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Divider
 } from '@mui/material';
 import { formatDateTime } from '../utils/dateHelpers';
 import {
@@ -27,10 +36,13 @@ import {
   Edit as EditIcon,
   Check as CheckIcon,
   Close as CloseIcon,
-  Repeat as RepeatIcon
+  Repeat as RepeatIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  AccountBalance as SettlementIcon
 } from '@mui/icons-material';
 import DriverMessagingModal from './DriverMessagingModal';
-import { dashboardAPI } from '../services/apiService';
+import { dashboardAPI, driversAPI } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { useAlert } from '../contexts/AlertContext';
 import { getRideStatus, getRideStatusColor, getRideStatusStyle, getDriverStatusColor } from '../utils/Status';
@@ -64,6 +76,14 @@ const MetricListView = ({
   const [editingPriceRideId, setEditingPriceRideId] = useState(null);
   const [editedPrice, setEditedPrice] = useState('');
   const [editedDriverComp, setEditedDriverComp] = useState('');
+
+  // Unsettled drivers state
+  const [unsettledRidesCounts, setUnsettledRidesCounts] = useState({}); // {driverId: count}
+  const [expandedDrivers, setExpandedDrivers] = useState(new Set());
+  const [unsettledRidesMap, setUnsettledRidesMap] = useState({}); // {driverId: rides[]}
+  const [loadingUnsettledRides, setLoadingUnsettledRides] = useState({});
+  const [settlingDrivers, setSettlingDrivers] = useState({});
+  const [settlingRides, setSettlingRides] = useState({});
 
   // Load data based on metricType when component mounts or when initialData is empty
   useEffect(() => {
@@ -101,6 +121,9 @@ const MetricListView = ({
             break;
           case 'driversOnJob':
             fetchedData = await dashboardAPI.getDriversOnJob();
+            break;
+          case 'unsettledDrivers':
+            fetchedData = await dashboardAPI.getUnsettledDrivers();
             break;
           default:
             console.warn('Unknown metric type:', metricType);
@@ -143,6 +166,128 @@ const MetricListView = ({
 
     fetchDriverStatuses();
   }, [data, metricType]);
+
+  // Fetch unsettled rides counts for unsettledDrivers view
+  useEffect(() => {
+    const fetchUnsettledRidesCounts = async () => {
+      if (metricType === 'unsettledDrivers' && Array.isArray(data) && data.length > 0) {
+        const countPromises = data.map(async (driver) => {
+          try {
+            const rides = await dashboardAPI.getUnsettledRidesByDriver(driver.id);
+            return { id: driver.id, count: rides?.length || 0 };
+          } catch (error) {
+            console.error(`Failed to fetch unsettled rides for driver ${driver.id}:`, error);
+            return { id: driver.id, count: 0 };
+          }
+        });
+
+        const results = await Promise.all(countPromises);
+        const countsMap = {};
+        results.forEach(({ id, count }) => {
+          countsMap[id] = count;
+        });
+
+        setUnsettledRidesCounts(countsMap);
+      }
+    };
+
+    fetchUnsettledRidesCounts();
+  }, [data, metricType]);
+
+  // Toggle driver expansion and load their unsettled rides
+  const toggleDriverExpand = async (driverId) => {
+    const isExpanded = expandedDrivers.has(driverId);
+
+    if (isExpanded) {
+      setExpandedDrivers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(driverId);
+        return newSet;
+      });
+    } else {
+      setExpandedDrivers(prev => new Set([...prev, driverId]));
+
+      if (!unsettledRidesMap[driverId]) {
+        setLoadingUnsettledRides(prev => ({ ...prev, [driverId]: true }));
+        try {
+          const rides = await dashboardAPI.getUnsettledRidesByDriver(driverId);
+          setUnsettledRidesMap(prev => ({ ...prev, [driverId]: rides || [] }));
+        } catch (error) {
+          console.error('Error loading unsettled rides:', error);
+        } finally {
+          setLoadingUnsettledRides(prev => ({ ...prev, [driverId]: false }));
+        }
+      }
+    }
+  };
+
+  const calculateUnsettledAmount = (ride) => {
+    const cost = ride.cost || 0;
+    const driversComp = ride.driversCompensation || 0;
+
+    //console.log(`Calculating unsettled amount for Ride #${ride.rideId}: Cost=$${cost}, Driver's Comp=$${driversComp}, Diff=$${cost - driversComp}, PaymentType=${ride.paymentType}`);
+    if (ride.paymentType === 'cash' || ride.paymentType === 'zelle') {
+      return - (ride.cost - ride.driversCompensation);
+    } else {
+      return ride.driversCompensation;
+    }
+  };
+
+  // Settle all rides for a driver
+  const handleSettleDriver = async (driverId) => {
+    setSettlingDrivers(prev => ({ ...prev, [driverId]: true }));
+    try {
+      await dashboardAPI.settleDriver(driverId);
+      showToast('Driver settled successfully', 'success');
+      // Remove driver from list
+      setData(prev => prev.filter(d => d.id !== driverId));
+      // Clear their data
+      setUnsettledRidesMap(prev => {
+        const newMap = { ...prev };
+        delete newMap[driverId];
+        return newMap;
+      });
+      setUnsettledRidesCounts(prev => {
+        const newCounts = { ...prev };
+        delete newCounts[driverId];
+        return newCounts;
+      });
+    } catch (error) {
+      console.error('Error settling driver:', error);
+      showAlert('Error', 'Failed to settle driver. Please try again.', [{ text: 'OK' }], 'error');
+    } finally {
+      setSettlingDrivers(prev => ({ ...prev, [driverId]: false }));
+    }
+  };
+
+  // Settle a single ride
+  const handleSettleRide = async (driverId, rideId) => {
+    setSettlingRides(prev => ({ ...prev, [rideId]: true }));
+    try {
+      await dashboardAPI.settleRide(rideId);
+      showToast('Ride settled successfully', 'success');
+      // Remove ride from driver's list
+      setUnsettledRidesMap(prev => ({
+        ...prev,
+        [driverId]: (prev[driverId] || []).filter(r => r.rideId !== rideId)
+      }));
+      // Update count
+      setUnsettledRidesCounts(prev => ({
+        ...prev,
+        [driverId]: Math.max(0, (prev[driverId] || 1) - 1)
+      }));
+      // If no more rides, remove driver from list
+      const remainingRides = (unsettledRidesMap[driverId] || []).filter(r => r.rideId !== rideId);
+      if (remainingRides.length === 0) {
+        setData(prev => prev.filter(d => d.id !== driverId));
+      }
+    } catch (error) {
+      console.error('Error settling ride:', error);
+      showAlert('Error', 'Failed to settle ride. Please try again.', [{ text: 'OK' }], 'error');
+    } finally {
+      setSettlingRides(prev => ({ ...prev, [rideId]: false }));
+    }
+  };
 
   const handleCancelCall = async (callId) => {
     showAlert(
@@ -392,13 +537,16 @@ const MetricListView = ({
         return 'Active Drivers';
       case 'driversOnJob':
         return 'Drivers On Job';
+      case 'unsettledDrivers':
+        return 'Unsettled Drivers';
       default:
         return 'List View';
     }
   };
 
   const isRideList = metricType?.includes('Rides') || metricType?.includes('rides');
-  const isDriverList = metricType?.includes('Drivers') || metricType?.includes('drivers');
+  const isDriverList = (metricType?.includes('Drivers') || metricType?.includes('drivers')) && metricType !== 'unsettledDrivers';
+  const isUnsettledDriversList = metricType === 'unsettledDrivers';
 
   // Filter data based on search query
   const getFilteredData = () => {
@@ -428,6 +576,20 @@ const MetricListView = ({
     }
 
     if (isDriverList) {
+      return data.filter(driver => {
+        const searchableFields = [
+          driver.id?.toString(),
+          driver.name,
+          driver.phoneNumber,
+          driver.email,
+        ];
+        return searchableFields.some(field =>
+          field && field.toLowerCase().includes(query)
+        );
+      });
+    }
+
+    if (isUnsettledDriversList) {
       return data.filter(driver => {
         const searchableFields = [
           driver.id?.toString(),
@@ -795,6 +957,237 @@ const MetricListView = ({
     )
   };
 
+  // Render unsettled driver item - similar to renderDriverItem but with unsettled rides section
+  const renderUnsettledDriverItem = (driver) => {
+    const status = driverStatuses[driver.id] || 'loading';
+    const unreadCount = driversWithUnread.get(driver.id) || 0;
+    const unsettledCount = unsettledRidesCounts[driver.id];
+    const isExpanded = expandedDrivers.has(driver.id);
+    const rides = unsettledRidesMap[driver.id] || [];
+    const isLoadingRides = loadingUnsettledRides[driver.id];
+    const isSettling = settlingDrivers[driver.id];
+
+    // Calculate total amounts
+    let totalOwedToDriver = 0; // Company owes driver (CC payments)
+    let totalOwedByDriver = 0; // Driver owes company (Cash/Other)
+    rides.forEach(ride => {
+
+      if (ride.paymentType === 'cash' || ride.paymentType === 'zelle') {
+        totalOwedByDriver += (ride.cost - ride.driversCompensation);
+      } else {
+        totalOwedToDriver += ride.driversCompensation;
+      }
+    });
+
+    return (
+      <Card key={driver.id} sx={{ mb: 2 }}>
+        <CardContent>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Typography variant="h6" color="primary">
+                Driver Id #{driver.id}
+              </Typography>
+              {unsettledCount !== undefined && (
+                <Chip
+                  size="small"
+                  label={`${unsettledCount} unsettled`}
+                  color={`${unsettledCount >= 20 ? 'error' : unsettledCount >= 10 ? 'warning' : 'default'}`}
+                  icon={<SettlementIcon />}
+                />
+              )}
+              {!!unreadCount && (
+                <Badge color="error" variant="dot">
+                  <UnreadIcon color="error" fontSize="small" />
+                </Badge>
+              )}
+            </Box>
+            <Chip
+              label={status}
+              color={getDriverStatusColor(status)}
+              size="small"
+              sx={getRideStatusStyle(status)}
+            />
+          </Box>
+
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">
+                🙎‍♂️ <strong>Name:</strong> {driver.name}
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">
+                ☎️ <strong>Phone #:</strong> {driver.phoneNumber}
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">
+                📧 <strong>Email:</strong> {driver.email}
+              </Typography>
+            </Grid>
+          </Grid>
+        </CardContent>
+
+        <CardActions sx={{ gap: 1, p: 2, pt: 0, flexDirection: 'column', alignItems: 'stretch' }}>
+          <Box display="flex" gap={1} flexWrap="wrap">
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => onItemClick('driver', driver.id)}
+            >
+              View Details
+            </Button>
+
+            <Badge
+              badgeContent={unreadCount}
+              color="error"
+              max={99}
+            >
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<MessageIcon />}
+                onClick={() => handleMessageDriver(driver.id, driver.name)}
+              >
+                Message Driver
+              </Button>
+            </Badge>
+
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => toggleDriverExpand(driver.id)}
+              endIcon={isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            >
+              {isExpanded ? 'Hide Unsettled Rides' : 'Show Unsettled Rides'}
+            </Button>
+          </Box>
+
+          {/* Collapsible unsettled rides section */}
+          <Collapse in={isExpanded} timeout="auto" unmountOnExit sx={{ width: '100%', mt: 2 }}>
+            <Divider sx={{ mb: 2 }} />
+
+            {isLoadingRides ? (
+              <Box display="flex" justifyContent="center" p={2}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : rides.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                No unsettled rides found.
+              </Typography>
+            ) : (
+              <>
+                {/* Summary */}
+                <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                    💰 Settlement Summary
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="success.main">
+                        <strong>Company owes driver:</strong> ${totalOwedToDriver.toFixed(2)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="error.main">
+                        <strong>Driver owes company:</strong> ${totalOwedByDriver.toFixed(2)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography variant="body1" fontWeight="bold">
+                        Net: {totalOwedToDriver > totalOwedByDriver ? (
+                          <span style={{ color: 'green' }}>Pay driver ${(totalOwedToDriver - totalOwedByDriver).toFixed(2)}</span>
+                        ) : totalOwedByDriver > totalOwedToDriver ? (
+                          <span style={{ color: 'red' }}>Collect ${(totalOwedByDriver - totalOwedToDriver).toFixed(2)} from driver</span>
+                        ) : (
+                          <span>Even - $0.00</span>
+                        )}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                </Box>
+
+                {/* Rides table */}
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: 'grey.100' }}>
+                        <TableCell><strong>Ride ID</strong></TableCell>
+                        <TableCell><strong>Date</strong></TableCell>
+                        <TableCell><strong>Payment</strong></TableCell>
+                        <TableCell align="right"><strong>Cost</strong></TableCell>
+                        <TableCell align="right"><strong>Driver Comp</strong></TableCell>
+                        <TableCell align="right"><strong>Unsettled Amt</strong></TableCell>
+                        <TableCell align="center"><strong>Action</strong></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {rides.map((ride) => {
+                        const amount = calculateUnsettledAmount(ride);
+                        const isSettlingRide = settlingRides[ride.rideId];
+                        return (
+                          <TableRow key={ride.rideId} hover>
+                            <TableCell>{ride.rideId}</TableCell>
+                            <TableCell>
+                              {ride.scheduledFor ? formatDateTime(ride.scheduledFor) : 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                size="small"
+                                label={ride.paymentType === 'dispatcherCC' ? 'CC on file' : ride.paymentType}
+                                color={ride.paymentType === 'dispatcherCC' || ride.paymentType === 'driverCC' ? 'primary' : ride.paymentType === 'cash' ? 'success' : 'default'}
+                              />
+                            </TableCell>
+                            <TableCell align="right">${(ride.cost || 0).toFixed(2)}</TableCell>
+                            <TableCell align="right">${(ride.driversCompensation || 0).toFixed(2)}</TableCell>
+                            <TableCell align="right">
+                              <Typography
+                                variant="body2"
+                                fontWeight="bold"
+                                color={ride.paymentType === 'cash' || ride.paymentType === 'zelle' ? 'error.main' : 'success.main'}
+                              >
+                                ${ride.paymentType === 'cash' || ride.paymentType === 'zelle' ? (
+                                  (ride.cost - ride.driversCompensation).toFixed(2)) : (
+                                  ride.driversCompensation.toFixed(2))}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="center">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => handleSettleRide(driver.id, ride.rideId)}
+                                disabled={isSettlingRide}
+                                startIcon={isSettlingRide ? <CircularProgress size={14} /> : <CheckIcon />}
+                              >
+                                Settle
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Settle All button */}
+                <Button
+                  variant="contained"
+                  color="primary"
+                  fullWidth
+                  onClick={() => handleSettleDriver(driver.id)}
+                  disabled={isSettling}
+                  startIcon={isSettling ? <CircularProgress size={20} color="inherit" /> : <SettlementIcon />}
+                >
+                  {isSettling ? 'Settling...' : `Settle All (${rides.length} rides)`}
+                </Button>
+              </>
+            )}
+          </Collapse>
+        </CardActions>
+      </Card>
+    );
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Paper elevation={0} sx={{ p: 2, mb: 3 }}>
@@ -857,6 +1250,7 @@ const MetricListView = ({
           <Box>
             {isRideList && Array.isArray(filteredData) && filteredData.map(renderRideItem)}
             {isDriverList && Array.isArray(filteredData) && filteredData.map(renderDriverItem)}
+            {isUnsettledDriversList && Array.isArray(filteredData) && filteredData.map(renderUnsettledDriverItem)}
           </Box>
         )}
       </Box>

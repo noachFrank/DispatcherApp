@@ -37,8 +37,6 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useAlert } from '../contexts/AlertContext';
-import signalRService from '../services/signalRService';
-import { creditCardStorage } from '../utils/creditCardStorage';
 import { driversAPI, ridesAPI } from '../services/apiService';
 import AddressAutocomplete from './AddressAutocomplete';
 import SquarePaymentForm from './SquarePaymentForm';
@@ -322,7 +320,15 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       };
 
       const response = await ridesAPI.calculatePrice(priceRequest);
+      console.log('Pricing response:', response);
 
+      // showToast(
+      //   `Pricing: $${response.totalPrice} (${response.pricingMethod}) | ${response.originArea} → ${response.destinationArea}` +
+      //   (response.rushHourSurcharge > 0 ? ` | Rush +$${response.rushHourSurcharge}` : '') +
+      //   (response.minimumFareApplied ? ' | Min Fare Applied' : ''),
+      //   'info',
+      //   10000
+      // );
       if (response.success) {
         setPricingDetails(response);
         // Add $10 for car seat if needed
@@ -572,7 +578,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
   const handleSubmit = async () => {
     // Track if we just tokenized successfully
     let justTokenized = false;
-    
+
     // If payment type is Dispatcher CC and no token yet, try to tokenize
     if (formData.paymentType === 'dispatcherCC' && !formData.paymentTokenId) {
       if (window.squareTokenizeCard) {
@@ -592,9 +598,9 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
         console.warn('⚠️ Square tokenization function not available');
       }
     }
-    
+
     console.log('Submitting new call request...', formData);
-    
+
     // Skip token validation if we just tokenized (state may not be updated yet)
     if (!validateForm(justTokenized)) return;
 
