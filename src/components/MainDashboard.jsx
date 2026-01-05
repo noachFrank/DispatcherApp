@@ -130,15 +130,12 @@ const MainDashboard = () => {
     if (signalRConnection) {
       // Listen for messages from drivers to dispatchers
       const handleDriverMessage = async (messageData) => {
-        console.log('SignalR message received:', messageData);
-
         // Only process messages FROM drivers (not broadcasts or dispatcher messages)
         // Check both lowercase and PascalCase since C# serializes with PascalCase
         const from = (messageData.from || messageData.From || '').toLowerCase();
         const isFromDriver = from.startsWith('driver');
 
         if (!isFromDriver) {
-          console.log('Ignoring non-driver message:', from);
           return;
         }
 
@@ -147,14 +144,12 @@ const MainDashboard = () => {
         const message = messageData.message || messageData.Message;
         const messageId = messageData.id || messageData.Id;
 
-        console.log('Processing driver message from:', driverId, 'Message text:', message);
 
         // If NotificationPanel OR the messaging modal for this driver is open, mark as read immediately
         const isModalOpenForDriver = openMessagingDriverId === driverId;
         if ((showNotifications || isModalOpenForDriver) && messageId) {
           try {
             await signalRConnection.invoke('MarkMessagesAsRead', [messageId], 'dispatcher');
-            console.log('Marked incoming message as read via SignalR (panel/modal open for driver):', messageId);
             // Don't add to unread or increment count - panel/modal is open
             // Still play sound and show snackbar
             if (message) {
@@ -186,7 +181,6 @@ const MainDashboard = () => {
 
         // Add to unread messages
         setUnreadDriverMessages(prev => {
-          console.log('➕ Adding new message to unreadDriverMessages. Was:', prev.length);
           const updated = [...prev, {
             driverId,
             driverName,
@@ -194,7 +188,6 @@ const MainDashboard = () => {
             message,
             timestamp: new Date().toISOString()
           }];
-          console.log('➕ Now:', updated.length, 'messages');
           return updated;
         });
 
@@ -225,7 +218,6 @@ const MainDashboard = () => {
 
       // Listen for read receipts - when driver marks our message as read
       const handleMessageMarkedAsRead = (data) => {
-        console.log('📬 MainDashboard received MessageMarkedAsRead event:', data);
 
         // data = { messageId, driverId, markedBy: 'driver', timestamp }
         const { messageId, driverId, markedBy } = data;
@@ -233,16 +225,13 @@ const MainDashboard = () => {
         // IMPORTANT: Only process if the DRIVER marked it as read
         // Don't process if we (dispatcher) marked it as read - we already handled it optimistically
         if (markedBy === 'dispatcher') {
-          console.log('⏭️ Ignoring MessageMarkedAsRead - we marked it as read (already handled optimistically)');
           return;
         }
 
         if (driverId && messageId) {
           // Remove this specific message from unread list
           setUnreadDriverMessages(prev => {
-            console.log('🔄 MessageMarkedAsRead: Updating unreadDriverMessages from', prev.length, 'messages');
             const updated = prev.filter(msg => msg.messageId !== messageId && msg.id !== messageId);
-            console.log('🔄 MessageMarkedAsRead: Filtered to', updated.length, 'messages');
 
             // Update the badge count for this driver
             const remainingForDriver = updated.filter(msg => msg.driverId === driverId);
@@ -251,23 +240,19 @@ const MainDashboard = () => {
               if (remainingForDriver.length === 0) {
                 // No more unread messages from this driver
                 newMap.delete(driverId);
-                console.log(`🔄 MessageMarkedAsRead: Removed driver ${driverId} from badge map`);
               } else {
                 // Update count
                 newMap.set(driverId, remainingForDriver.length);
-                console.log(`🔄 MessageMarkedAsRead: Updated driver ${driverId} badge to ${remainingForDriver.length}`);
               }
               return newMap;
             });
 
             // Update total notification count
             setNotificationCount(updated.length);
-            console.log(`🔄 MessageMarkedAsRead: Updated notificationCount to ${updated.length}`);
 
             return updated;
           });
 
-          console.log(`✅ Updated badge for driver ${driverId} after message ${messageId} marked as read`);
         }
       };
 
@@ -298,7 +283,6 @@ const MainDashboard = () => {
       const roleData = await adminAPI.user.isAdmin(user.userId);
 
       // The API returns { isAdmin: boolean }
-      console.log('Admin role data:', roleData);
       setIsAdmin(roleData.isAdmin);
     } catch (error) {
       console.error('Failed to check admin access:', error);
@@ -338,7 +322,6 @@ const MainDashboard = () => {
    */
   const markDriverMessagesAsRead = useCallback(async (driverId) => {
     try {
-      console.log('🔵 markDriverMessagesAsRead called for driver:', driverId);
 
       // Track that this driver's modal is open (suppresses badge)
       setOpenMessagingDriverId(driverId);
@@ -349,32 +332,27 @@ const MainDashboard = () => {
         .map(msg => msg.messageId || msg.id)
         .filter(id => id); // Filter out undefined/null
 
-      console.log('📧 Found', messageIds.length, 'unread messages to mark as read:', messageIds);
 
       // Update local state FIRST (optimistic update)
       setUnreadDriverMessages(prev => {
         const filtered = prev.filter(msg => msg.driverId !== driverId);
-        console.log('📝 Updated unreadDriverMessages, removed', prev.length - filtered.length, 'messages');
         return filtered;
       });
 
       setDriversWithUnread(prev => {
         const newMap = new Map(prev);
         newMap.delete(driverId);
-        console.log('📝 Updated driversWithUnread, removed driver', driverId);
         return newMap;
       });
 
       setNotificationCount(prev => {
         const newCount = Math.max(0, prev - messageIds.length);
-        console.log('📝 Updated notificationCount from', prev, 'to', newCount);
         return newCount;
       });
 
       // Then mark as read on server via SignalR
       if (messageIds.length > 0 && signalRConnection) {
         await signalRConnection.invoke('MarkMessagesAsRead', messageIds, 'dispatcher');
-        console.log('✅ Marked messages as read via SignalR for driver:', driverId, messageIds);
       }
     } catch (error) {
       console.error('Error marking messages as read:', error);
@@ -385,7 +363,6 @@ const MainDashboard = () => {
    * Called when messaging modal closes
    */
   const handleMessagingModalClose = useCallback(() => {
-    console.log('🔴 Messaging modal closing');
     setOpenMessagingDriverId(null);
 
     // Remove messagingDriverId from URL while preserving other params
@@ -399,9 +376,6 @@ const MainDashboard = () => {
    * Open messaging modal with URL update
    */
   const openMessagingModal = useCallback((driverId) => {
-    console.log('🔵 openMessagingModal called with driverId:', driverId);
-    console.log('🔵 Current view:', currentView);
-
     // Set state directly for immediate effect
     setOpenMessagingDriverId(driverId);
 
@@ -430,7 +404,6 @@ const MainDashboard = () => {
    * Used when clicking on a "Cancel Call" or "Reassign Call" message
    */
   const navigateToRideHistory = useCallback((rideId) => {
-    console.log('🔵 Navigating to ride history for rideId:', rideId);
 
     setHistorySearchQuery(rideId.toString());
     setCurrentView('history');
@@ -446,7 +419,6 @@ const MainDashboard = () => {
       search.delete('messagingDriverId');
       const searchString = search.toString();
       const cleanUrl = `/dispatch/history${searchString ? '?' + searchString : ''}`;
-      console.log('🔵 Cleaning URL to:', cleanUrl);
       navigate(cleanUrl, { replace: true });
     }, 50);
   }, [navigate]);

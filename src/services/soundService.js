@@ -74,7 +74,6 @@ class SoundService {
             oscillator.start(audioContext.currentTime);
             oscillator.stop(audioContext.currentTime + duration);
 
-            console.log('✅ Sound played successfully:', frequency + 'Hz for', duration + 's');
         } catch (error) {
             console.error('❌ Error playing sound:', error);
         }
@@ -115,7 +114,6 @@ class SoundService {
      */
     play(soundType) {
         if (!this.enabled) {
-            console.log('Sound disabled, not playing:', soundType);
             return;
         }
 
@@ -125,7 +123,6 @@ class SoundService {
             return;
         }
 
-        console.log('Playing sound:', soundType);
 
         // Always use Web Audio API fallback for now (MP3 files not present)
         // You can add MP3 files later and they'll be used automatically
@@ -142,11 +139,9 @@ class SoundService {
      */
     playMessageSound(messageText) {
         if (!this.enabled) {
-            console.log('Sound disabled, not playing message sound');
             return;
         }
 
-        console.log('Playing message sound for:', messageText);
 
         // Check if message contains urgent keywords
         const text = messageText || '';
@@ -155,7 +150,6 @@ class SoundService {
             text.toLowerCase().includes(keyword)
         );
 
-        console.log('Message is urgent:', isUrgent);
         this.play(isUrgent ? 'urgent' : 'message');
     }
 
@@ -185,7 +179,6 @@ class SoundService {
      * Call from browser console: window.testSounds()
      */
     testAllSounds() {
-        console.log('Testing all sounds...');
         this.play('message');
         setTimeout(() => this.play('urgent'), 500);
         setTimeout(() => this.play('sent'), 1000);

@@ -22,7 +22,6 @@ export const AuthProvider = ({ children }) => {
 
   // Define forceLogout function
   const forceLogout = async () => {
-    console.log('🔴 Force logout triggered (token invalid/expired)');
     await stopSignalR();
     setSignalRConnection(null);
     setIsAuthenticated(false);
@@ -81,16 +80,15 @@ export const AuthProvider = ({ children }) => {
 
     try {
       await connection.start();
-      console.log("✅ Connected to DispatchHub");
 
       // Register dispatcher with the hub (ensure it's sent as string)
       await connection.invoke('RegisterDispatcher', String(dispatcherId));
 
       setSignalRConnection(connection);
     } catch (err) {
-      console.log(err);
-      console.log('%c⚠️ SignalR hub not available', 'color: orange; font-weight: bold');
-      console.log('%cThe app will work in HTTP polling mode. Start the backend hub for real-time features.', 'color: gray');
+      console.error(err);
+      console.error('%c⚠️ SignalR hub not available', 'color: orange; font-weight: bold');
+      console.error('%cThe app will work in HTTP polling mode. Start the backend hub for real-time features.', 'color: gray');
       setSignalRConnection(null);
     }
   };
@@ -131,7 +129,6 @@ export const AuthProvider = ({ children }) => {
       // CRITICAL: Store JWT token separately for API requests
       if (userData.token) {
         localStorage.setItem('dispatch_jwt_token', userData.token);
-        console.log('JWT token stored for API requests');
       } else {
         console.error('⚠️ No token in login response!');
       }

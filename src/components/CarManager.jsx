@@ -49,7 +49,6 @@ const CarManager = ({ driverId, driverName, onClose }) => {
     try {
       setLoading(true);
       const data = await adminAPI.cars.getByDriver(driverId);
-      console.log('Loaded cars data:', data);
       // Ensure data is always an array
       const carsArray = Array.isArray(data) ? data : [];
 

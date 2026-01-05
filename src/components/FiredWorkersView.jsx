@@ -37,7 +37,6 @@ const FiredWorkersView = () => {
             setLoading(true);
             setError(null);
             const data = await adminAPI.user.getFiredWorkers();
-            console.log('Fired workers data:', data);
             setFiredWorkers({
                 dispatchers: data.Dispatchers || data.dispatchers || [],
                 drivers: data.Drivers || data.drivers || []

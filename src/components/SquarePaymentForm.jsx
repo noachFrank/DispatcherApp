@@ -59,7 +59,6 @@ const SquarePaymentForm = ({ onTokenGenerated, onError }) => {
 
     const initializeSquare = async () => {
         try {
-            console.log('🔷 Initializing Square Payments...');
 
             const container = document.getElementById('card-container');
             if (!container) {
@@ -80,7 +79,6 @@ const SquarePaymentForm = ({ onTokenGenerated, onError }) => {
             const cardInstance = await paymentsInstance.card();
             await cardInstance.attach('#card-container');
 
-            console.log('✅ Square Card Form initialized');
             setCard(cardInstance);
         } catch (err) {
             console.error('❌ Failed to initialize Square:', err);
@@ -106,15 +104,11 @@ const SquarePaymentForm = ({ onTokenGenerated, onError }) => {
         }
 
         try {
-            console.log('💳 Tokenizing card...');
             setError(null);
 
             const result = await card.tokenize();
 
             if (result.status === 'OK') {
-                console.log('✅ Card tokenized successfully');
-                console.log('Token:', result.token);
-
                 // Pass token to parent component
                 if (onTokenGenerated) {
                     onTokenGenerated(result.token, cardholderName);
@@ -150,7 +144,6 @@ const SquarePaymentForm = ({ onTokenGenerated, onError }) => {
         if (card) {
             // Make tokenize function available globally (for parent to call)
             window.squareTokenizeCard = tokenizeCard;
-            console.log('✅ Square tokenization function registered');
         }
 
         return () => {

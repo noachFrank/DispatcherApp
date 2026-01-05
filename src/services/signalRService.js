@@ -36,18 +36,16 @@ class SignalRService {
 
     // Handle message marked as read notification
     this.connection.on('MessageMarkedAsRead', (data) => {
-      console.log('Message marked as read:', data);
       this.messageMarkedAsReadCallbacks.forEach(cb => cb(data));
     });
 
     try {
       await this.connection.start();
-      console.log('✅ SignalR Connected - Real-time updates enabled');
     } catch (err) {
       alert('Failed to connect to the server, please contact support.');
 
-      console.warn('⚠️  SignalR not available - using HTTP polling fallback');
-      console.log('To enable real-time features, implement the SignalR hub on your server');
+      console.error('⚠️  SignalR not available - using HTTP polling fallback');
+      console.error('To enable real-time features, implement the SignalR hub on your server');
       this.connection = null; // Clear connection on failure
     }
   }
@@ -287,7 +285,6 @@ class SignalRService {
 
     try {
       await this.connection.invoke('MarkMessagesAsRead', messageIds, 'dispatcher');
-      console.log('✅ Marked messages as read:', messageIds);
     } catch (err) {
       console.error('Failed to mark messages as read:', err);
       throw err;

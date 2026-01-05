@@ -126,9 +126,6 @@ const DriverTracking = ({ isAdmin = false }) => {
                     driversAPI.getOnlineDrivers().catch(() => [])
                 ]);
 
-                console.log('🚗 Driving drivers:', drivingData?.length || 0, drivingData);
-                console.log('🟢 Online/Available drivers:', onlineData?.length || 0, onlineData);
-
                 // Deduplicate driving drivers by ID (in case API returns duplicates)
                 const uniqueDrivingDrivers = [];
                 const seenDrivingIds = new Set();
@@ -162,19 +159,15 @@ const DriverTracking = ({ isAdmin = false }) => {
                 // Also try to get any existing locations from SignalR
                 if (signalRConnection) {
                     try {
-                        console.log('📡 Fetching driver locations from SignalR...');
                         const locations = await signalRConnection.invoke('GetAllDriverLocations');
-                        console.log('📍 Got driver locations:', locations);
                         const locationsMap = {};
                         (locations || []).forEach(loc => {
                             locationsMap[loc.driverId] = loc;
                         });
                         setDriverLocations(locationsMap);
                     } catch (err) {
-                        console.log('Could not fetch initial locations:', err);
                     }
                 } else {
-                    console.log('⚠️ SignalR connection not available for location tracking');
                 }
             } catch (error) {
                 console.error('Failed to load data:', error);
@@ -199,7 +192,6 @@ const DriverTracking = ({ isAdmin = false }) => {
 
         // Refetch driver lists when needed
         const refreshDriverLists = async () => {
-            console.log('🔄 Refreshing driver lists...');
             try {
                 const [drivingData, onlineData] = await Promise.all([
                     driversAPI.getDriversDriving().catch(() => []),
@@ -225,7 +217,6 @@ const DriverTracking = ({ isAdmin = false }) => {
         };
 
         const handleLocationUpdated = (location) => {
-            console.log('📍 Driver location updated:', location);
             setDriverLocations(prev => ({
                 ...prev,
                 [location.driverId]: location
@@ -233,7 +224,6 @@ const DriverTracking = ({ isAdmin = false }) => {
         };
 
         const handleLocationRemoved = (driverId) => {
-            console.log('📍 Driver location removed:', driverId);
             setDriverLocations(prev => {
                 const newLocations = { ...prev };
                 delete newLocations[driverId];
@@ -243,19 +233,16 @@ const DriverTracking = ({ isAdmin = false }) => {
 
         // When a call is updated (assigned, completed, etc.), refresh the driver lists
         const handleCallUpdated = (data) => {
-            console.log('📞 Call updated, refreshing drivers:', data);
             refreshDriverLists();
         };
 
         // When a call is assigned to a driver
         const handleCallAssigned = (data) => {
-            console.log('📞 Call assigned, refreshing drivers:', data);
             refreshDriverLists();
         };
 
         // When a ride is completed (dropoff clicked)
         const handleRideCompleted = (data) => {
-            console.log('✅ Ride completed, refreshing drivers:', data);
             refreshDriverLists();
         };
 

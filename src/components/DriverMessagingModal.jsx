@@ -113,8 +113,6 @@ const DriverMessagingModal = ({
             // Set up SignalR listener for real-time incoming messages from this driver
             if (signalRConnection) {
                 const handleReceiveMessage = async (messageData) => {
-                    console.log('Message received in modal:', messageData);
-
                     // Only add if it's from the driver we're chatting with
                     if (messageData.fromDriverId === driverId || messageData.driverId === driverId) {
                         const messageId = messageData.messageId || messageData.id || Date.now();
@@ -134,7 +132,6 @@ const DriverMessagingModal = ({
                         if (messageId && typeof messageId === 'number') {
                             try {
                                 await signalRConnection.invoke('MarkMessagesAsRead', [messageId], 'dispatcher');
-                                console.log('Marked incoming message as read via SignalR (modal open):', messageId);
                             } catch (error) {
                                 console.error('Error marking incoming message as read via SignalR:', error);
                             }
@@ -144,27 +141,17 @@ const DriverMessagingModal = ({
 
                 // Listen for read receipts - when driver marks our message as read
                 const handleMessageMarkedAsRead = (data) => {
-                    console.log('📬 Driver marked message as read in modal:', data);
-                    console.log('Looking for message ID:', data.messageId);
 
                     // Update the message in our local state to mark it as read
                     setMessages(prev => {
                         let foundMessage = false;
                         const updated = prev.map(msg => {
                             if (msg.id === data.messageId) {
-                                console.log('✅ Found and updating message:', msg.id, msg.message, 'from', msg.from, 'was read:', msg.read);
                                 foundMessage = true;
                                 return { ...msg, read: true };
                             }
                             return msg;
                         });
-
-                        if (!foundMessage) {
-                            console.log('❌ Message ID', data.messageId, 'not found in messages array');
-                            console.log('Available message IDs:', prev.map(m => ({ id: m.id, from: m.from, message: m.message?.substring(0, 30) })));
-                        } else {
-                            console.log('✅ Successfully marked message', data.messageId, 'as read');
-                        }
 
                         return updated;
                     });
@@ -214,7 +201,6 @@ const DriverMessagingModal = ({
             // Fetch today's messages for this driver
             const todaysMessages = await messagesAPI.getAllMessages(driverId);
 
-            console.log('Fetched messages for driver', driverId, ':', todaysMessages);
             setMessages(todaysMessages || []);
 
             // Find the first unread message FROM the driver for the unread divider
@@ -267,7 +253,6 @@ const DriverMessagingModal = ({
                 if (unreadIds.length > 0) {
                     try {
                         await signalRConnection.invoke('MarkMessagesAsRead', unreadIds, 'dispatcher');
-                        console.log('Marked unread driver messages as read before sending:', unreadIds);
                         // Update local state
                         setMessages(prev => prev.map(msg =>
                             unreadIds.includes(msg.id)
@@ -280,9 +265,6 @@ const DriverMessagingModal = ({
                     }
                 }
             }
-
-            console.log('Sending message to driver', driverId, ':', messageText);
-            console.log('Ride context:', rideContext);
 
             if (!signalRConnection) {
                 throw new Error('SignalR not connected. Please refresh the page.');
@@ -297,8 +279,6 @@ const DriverMessagingModal = ({
                 RideId: rideContext?.rideId || null
             });
 
-            console.log('✅ Message saved with ID:', savedMessage.id || savedMessage.Id);
-
             // Add to local messages with the REAL database ID
             const sentMessage = {
                 id: savedMessage.id || savedMessage.Id,
@@ -310,7 +290,6 @@ const DriverMessagingModal = ({
             };
 
             setMessages(prev => [...prev, sentMessage]);
-            console.log('Message sent successfully to driver', driverId);
 
             // Play sound notification for sent message
             soundService.playMessageSentSound();
@@ -359,7 +338,6 @@ const DriverMessagingModal = ({
         const cancelMatch = message.match(/Cancel Ride Request:\s*RideId\s*(\d+)/i);
         const reassignMatch = message.match(/Reassign Ride Request:\s*RideId\s*(\d+)/i);
         const resetMatch = message.match(/Reset Pickup Request:\s*RideId\s*(\d+)/i);
-        //console.log('Parsing message for clickable patterns:', message, 'cancel: ', cancelMatch, 'reassign: ', reassignMatch);
         if (cancelMatch) {
             return { isClickable: true, rideId: cancelMatch[1], type: 'cancel' };
         }

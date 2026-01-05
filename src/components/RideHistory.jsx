@@ -289,7 +289,6 @@ const RideHistory = ({ isAdmin = false, onItemClick, initialSearchQuery = '', on
                     onPress: async () => {
                         try {
                             if (signalRConnection && signalRConnection.state === 'Connected') {
-                                console.log('Cancelling call via SignalR:', rideId);
                                 await signalRConnection.invoke("CallCanceled", rideId);
                             } else {
                                 const state = signalRConnection?.state || 'Not initialized';
@@ -328,7 +327,6 @@ const RideHistory = ({ isAdmin = false, onItemClick, initialSearchQuery = '', on
                     onPress: async () => {
                         try {
                             if (signalRConnection && signalRConnection.state === 'Connected') {
-                                console.log('Reassigning call via SignalR:', rideId);
                                 await signalRConnection.invoke("CallDriverCancelled", rideId);
                             } else {
                                 const state = signalRConnection?.state || 'Not initialized';
@@ -392,7 +390,6 @@ const RideHistory = ({ isAdmin = false, onItemClick, initialSearchQuery = '', on
                     onPress: async () => {
                         try {
                             if (signalRConnection && signalRConnection.state === 'Connected') {
-                                console.log('Resetting pickup time via SignalR:', callId);
                                 await signalRConnection.invoke("ResetPickupTime", callId);
 
                             } else {

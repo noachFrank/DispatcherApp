@@ -99,7 +99,6 @@ const BroadcastMessagingModal = ({
         try {
             setLoading(true);
             const broadcastMessages = await messagesAPI.getBroadcastMessages();
-            console.log('Fetched broadcast messages:', broadcastMessages);
             setMessages(Array.isArray(broadcastMessages) ? broadcastMessages : []);
             scrollToBottom();
         } catch (error) {
@@ -123,8 +122,6 @@ const BroadcastMessagingModal = ({
         setSending(true);
 
         try {
-            console.log('Broadcasting message to all drivers:', messageText);
-
             if (!signalRConnection) {
                 throw new Error('SignalR not connected. Please refresh the page.');
             }
@@ -141,7 +138,6 @@ const BroadcastMessagingModal = ({
             };
 
             setMessages(prev => [...prev, sentMessage]);
-            console.log('Broadcast message sent successfully');
 
             // Play sound notification for broadcast sent
             soundService.playBroadcastSentSound();

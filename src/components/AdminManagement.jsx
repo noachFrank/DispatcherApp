@@ -75,7 +75,6 @@ const AdminManagement = ({ onNavigateToRideHistory, openMessagingModal, openMess
   };
 
   if (loading) {
-    console.log('loading');
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="400px">

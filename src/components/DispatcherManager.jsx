@@ -287,7 +287,6 @@ const DispatcherManager = () => {
 
   const handleFireConfirm = async () => {
     try {
-      console.log('Firing dispatcher with ID:', dispatcherToFire.id);
       await adminAPI.dispatchers.fire(dispatcherToFire.id);
       showToast('Dispatcher fired successfully.', 'success');
       setFireConfirmOpen(false);

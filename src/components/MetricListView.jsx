@@ -225,7 +225,6 @@ const MetricListView = ({
     const cost = ride.cost || 0;
     const driversComp = ride.driversCompensation || 0;
 
-    //console.log(`Calculating unsettled amount for Ride #${ride.rideId}: Cost=$${cost}, Driver's Comp=$${driversComp}, Diff=$${cost - driversComp}, PaymentType=${ride.paymentType}`);
     if (ride.paymentType === 'cash' || ride.paymentType === 'zelle') {
       return - (ride.cost - ride.driversCompensation);
     } else {
@@ -301,7 +300,6 @@ const MetricListView = ({
           onPress: async () => {
             try {
               if (signalRConnection && signalRConnection.state === 'Connected') {
-                console.log('Cancelling call via SignalR:', callId);
                 await signalRConnection.invoke("CallCanceled", callId);
               } else {
                 const state = signalRConnection?.state || 'Not initialized';
@@ -340,7 +338,6 @@ const MetricListView = ({
               // 3. Broadcast to all available drivers that the call is available
               // 4. Notify all dispatchers about the change
               if (signalRConnection && signalRConnection.state === 'Connected') {
-                console.log('Reassigning call via SignalR:', callId);
                 await signalRConnection.invoke("CallDriverCancelled", callId);
               } else {
                 const state = signalRConnection?.state || 'Not initialized';
@@ -375,7 +372,6 @@ const MetricListView = ({
           onPress: async () => {
             try {
               if (signalRConnection && signalRConnection.state === 'Connected') {
-                console.log('Resetting pickup time via SignalR:', callId);
                 await signalRConnection.invoke("ResetPickupTime", callId);
               } else {
                 const state = signalRConnection?.state || 'Not initialized';
@@ -610,8 +606,6 @@ const MetricListView = ({
 
   const renderRideItem = (ride) => {
     const status = getRideStatus(ride);
-    console.log(status);
-    console.log('recurring:', ride.isRecurring, ride.recurringId);
     return (
       <Card
         key={ride.rideId}

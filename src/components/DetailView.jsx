@@ -64,11 +64,9 @@ const DetailView = ({ isAdmin = false, itemType, itemId, onBackToList }) => {
         setStatus(rideStatus);
       } else if (itemType === 'driver') {
         data = await driversAPI.getById(itemId);
-        console.log('driver data:', data);
         const driverStatus = await driversAPI.getDriverStatus(data.id);
         setStatus(driverStatus);
       }
-      console.log(`${itemType} details:`, data);
       setItem(data);
     } catch (err) {
       console.error(`Failed to load ${itemType} details:`, err);
@@ -100,7 +98,6 @@ const DetailView = ({ isAdmin = false, itemType, itemId, onBackToList }) => {
 
 
   const renderRideDetails = (ride) => (
-    console.log('ride details', ride),
     <Grid spacing={4} justifyContent='center'>
 
       <Grid container spacing={3} sx={{ mb: 2 }} justifyContent='center'>
@@ -492,7 +489,6 @@ const DetailView = ({ isAdmin = false, itemType, itemId, onBackToList }) => {
   const renderDriverDetails = (driver) => {
     return (
       <Grid container spacing={3} justifyContent='center'>
-        {console.log('driver details', driver)}
         <Grid item xs={12} md={6}>
           {/* driver info */}
           <Card>

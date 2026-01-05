@@ -320,19 +320,11 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       };
 
       const response = await ridesAPI.calculatePrice(priceRequest);
-      console.log('Pricing response:', response);
 
-      // showToast(
-      //   `Pricing: $${response.totalPrice} (${response.pricingMethod}) | ${response.originArea} → ${response.destinationArea}` +
-      //   (response.rushHourSurcharge > 0 ? ` | Rush +$${response.rushHourSurcharge}` : '') +
-      //   (response.minimumFareApplied ? ' | Min Fare Applied' : ''),
-      //   'info',
-      //   10000
-      // );
       if (response.success) {
         setPricingDetails(response);
         // Add $10 for car seat if needed
-        const carSeatSurcharge = formData.carSeat ? 10 : 0;
+        const carSeatSurcharge = formData.carSeat ? formData.roundTrip ? 20 : 10 : 0;
         setFormData(prev => ({
           ...prev,
           cost: Math.round(response.totalPrice) + carSeatSurcharge,
@@ -411,7 +403,6 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
 
   const addStop = () => {
     // Maximum 10 stops allowed (stop1 through stop10 in the database)
-    console.log(formData.additionalStops.length);
     if (formData.additionalStops.length >= 10) {
       showAlert('Maximum Stops', 'Maximum 10 stops allowed', [{ text: 'OK' }], 'warning');
       return;
@@ -460,7 +451,6 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
 
   const validateForm = (skipTokenValidation = false) => {
     const newErrors = {};
-    //console.log(formData.customerPhoneNumber);
     if (!formData.customerPhoneNumber.trim()) {
       newErrors.customerPhoneNumber = 'Phone number is required';
     } else {
@@ -492,7 +482,6 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     }
 
     setErrors(newErrors);
-    //console.log("validating form...", newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
@@ -562,7 +551,6 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
   };
 
   const handlePaymentTokenGenerated = (token, cardholderName) => {
-    console.log('✅ Payment token received:', token);
     setFormData(prev => ({
       ...prev,
       paymentTokenId: token
@@ -582,7 +570,6 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
     // If payment type is Dispatcher CC and no token yet, try to tokenize
     if (formData.paymentType === 'dispatcherCC' && !formData.paymentTokenId) {
       if (window.squareTokenizeCard) {
-        console.log('🔄 Attempting to tokenize card before submission...');
         try {
           const token = await window.squareTokenizeCard();
           if (token) {
@@ -599,18 +586,14 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
       }
     }
 
-    console.log('Submitting new call request...', formData);
-
     // Skip token validation if we just tokenized (state may not be updated yet)
     if (!validateForm(justTokenized)) return;
 
     setIsSubmitting(true);
     try {
       const newRideData = buildNewRideObject();
-      console.log('Built ride object:', newRideData);
       try {
         if (signalRConnection) {
-          console.log('Broadcasting new call via SignalR...');
           await signalRConnection.invoke("NewCallCreated", newRideData, null);
         } else {
           console.warn('SignalR not connected, call created but not broadcasted in real-time');
@@ -621,7 +604,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
 
       onComplete(newRideData);
 
-      //clearForm();
+      clearForm();
 
       // Play success sound for call sent
       soundService.playCallSentSound();
@@ -870,7 +853,7 @@ const NewCallWizard = ({ onComplete, onCancel }) => {
                             sx={{ py: 0.25 }}
                           />
                         }
-                        label={<Typography variant="caption">Needs Car Seat (+$10)</Typography>}
+                        label={<Typography variant="caption">Needs Car Seat</Typography>}
                         sx={{ m: 0, height: 24 }}
                       />
                     </Box>

@@ -48,7 +48,6 @@ export default function ChangePasswordDialog({ open, onClose, userId, onSuccess 
 
         setLoading(true);
         try {
-            console.log('Submitting password change for userId:', userId);
             const result = await userAPI.updatePassword(userId, oldPassword, newPassword);
             if (result.success) {
                 onSuccess?.();
@@ -68,7 +67,6 @@ export default function ChangePasswordDialog({ open, onClose, userId, onSuccess 
         setLoading(true);
         setError('');
         try {
-            console.log('Requesting password reset for userId:', userId);
             const result = await userAPI.forgotPassword(userId);
             if (result.success) {
                 showToast(result.message, 'success');

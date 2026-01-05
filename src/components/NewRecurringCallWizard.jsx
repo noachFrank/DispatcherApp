@@ -475,7 +475,6 @@ const NewRecurringCallWizard = ({ onComplete, onCancel }) => {
     };
 
     const handlePaymentTokenGenerated = (token, cardholderName) => {
-        console.log('✅ Payment token received:', token);
         setFormData(prev => ({
             ...prev,
             paymentTokenId: token
@@ -492,7 +491,6 @@ const NewRecurringCallWizard = ({ onComplete, onCancel }) => {
         // If payment type is Dispatcher CC and no token yet, try to tokenize
         if (formData.paymentType === 'dispatcherCC' && !formData.paymentTokenId) {
             if (window.squareTokenizeCard) {
-                console.log('🔄 Attempting to tokenize card before submission...');
                 try {
                     await window.squareTokenizeCard();
                     // Wait a moment for the token to be set via callback
