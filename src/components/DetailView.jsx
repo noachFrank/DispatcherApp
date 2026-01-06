@@ -393,92 +393,90 @@ const DetailView = ({ isAdmin = false, itemType, itemId, onBackToList }) => {
       <Grid container spacing={3} sx={{ mb: 2 }} justifyContent='center'>
         {/* Payment Information Card */}
         <Grid item xs={12} >
-          {isAdmin && (
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom color="primary">
-                  Payment Information
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body1" color="text.secondary">
-                          💵 <strong>Total Cost: </strong>
-                        </Typography>
-                        <Typography variant="h6" color="success.main" fontWeight="bold">
-                          ${(ride.cost || 0).toFixed(2)}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body1" color="text.secondary">
-                          💵 <strong>Driver's Comp: </strong>
-                        </Typography>
-                        <Typography variant="h6" color="success.main" fontWeight="bold">
-                          ${(ride.driversCompensation || 0).toFixed(2)}
-                        </Typography>
-                      </Box>
-
-                      <Divider sx={{ my: 1 }} />
-
-                      <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 'bold', mb: 1 }}>
-                        Breakdown:
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom color="primary">
+                Payment Information
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="body1" color="text.secondary">
+                        💵 <strong>Total Cost: </strong>
                       </Typography>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Base Fare:
-                        </Typography>
-                        <Typography variant="body2" color="text.primary" fontWeight="600">
-                          ${(ride.cost - (ride.waitTimeAmount + ride.tip) || 0).toFixed(2)}
-                        </Typography>
-                      </Box>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Company Profit:
-                        </Typography>
-                        <Typography variant="body2" color="text.primary" fontWeight="600">
-                          ${((ride.cost || 0) - (ride.driversCompensation || 0)).toFixed(2)}
-                        </Typography>
-                      </Box>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Wait Time:
-                        </Typography>
-                        <Typography variant="body2" color="text.primary" fontWeight="600">
-                          ${((ride.waitTimeAmount || 0)).toFixed(2)}
-                        </Typography>
-                      </Box>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Tips:
-                        </Typography>
-                        <Typography variant="body2" color="text.primary" fontWeight="600">
-                          ${((ride.tip || 0)).toFixed(2)}
-                        </Typography>
-                      </Box>
-
-                      <Divider sx={{ my: 1 }} />
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" color="text.secondary">
-                          <strong>Payment Method:</strong>
-                        </Typography>
-                        <Chip
-                          label={ride.paymentType || 'Cash'}
-                          size="small"
-                          color={ride.paymentType === 'Credit Card' ? 'primary' : 'default'}
-                        />
-                      </Box>
+                      <Typography variant="h6" color="success.main" fontWeight="bold">
+                        ${(ride.cost || 0).toFixed(2)}
+                      </Typography>
                     </Box>
-                  </Grid>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="body1" color="text.secondary">
+                        💵 <strong>Driver's Comp: </strong>
+                      </Typography>
+                      <Typography variant="h6" color="success.main" fontWeight="bold">
+                        ${(ride.driversCompensation || 0).toFixed(2)}
+                      </Typography>
+                    </Box>
+
+                    <Divider sx={{ my: 1 }} />
+
+                    <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 'bold', mb: 1 }}>
+                      Breakdown:
+                    </Typography>
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Base Fare:
+                      </Typography>
+                      <Typography variant="body2" color="text.primary" fontWeight="600">
+                        ${(ride.cost - (ride.waitTimeAmount + ride.tip) || 0).toFixed(2)}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Company Profit:
+                      </Typography>
+                      <Typography variant="body2" color="text.primary" fontWeight="600">
+                        ${((ride.cost || 0) - (ride.driversCompensation || 0)).toFixed(2)}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Wait Time:
+                      </Typography>
+                      <Typography variant="body2" color="text.primary" fontWeight="600">
+                        ${((ride.waitTimeAmount || 0)).toFixed(2)}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', pl: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Tips:
+                      </Typography>
+                      <Typography variant="body2" color="text.primary" fontWeight="600">
+                        ${((ride.tip || 0)).toFixed(2)}
+                      </Typography>
+                    </Box>
+
+                    <Divider sx={{ my: 1 }} />
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        <strong>Payment Method:</strong>
+                      </Typography>
+                      <Chip
+                        label={ride.paymentType || 'Cash'}
+                        size="small"
+                        color={ride.paymentType === 'Credit Card' ? 'primary' : 'default'}
+                      />
+                    </Box>
+                  </Box>
                 </Grid>
-              </CardContent>
-            </Card>
-          )}
+              </Grid>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 

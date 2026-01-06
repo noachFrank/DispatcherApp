@@ -43,7 +43,7 @@ import {
 import { useAlert } from '../contexts/AlertContext';
 
 const MainDashboard = () => {
-  const { user, logout, signalRConnection } = useAuth();
+  const { user, logout, signalRConnection, connectSignalR } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -83,6 +83,13 @@ const MainDashboard = () => {
 
   // Track where detail view was navigated from (for proper back navigation)
   const [detailFromContext, setDetailFromContext] = useState(null); // { from: 'history', searchQuery: '' } or null
+
+  // Connect to SignalR when dashboard loads (lazy connection)
+  useEffect(() => {
+    if (connectSignalR) {
+      connectSignalR();
+    }
+  }, [connectSignalR]);
 
   // Sync state with URL on mount and location change
   useEffect(() => {

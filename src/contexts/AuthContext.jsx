@@ -57,8 +57,8 @@ export const AuthProvider = ({ children }) => {
 
       setIsAuthenticated(true);
       setUser(authData.user);
-      // Reinitialize SignalR for returning user
-      initializeSignalR(authData.user.userId);
+      // NOTE: SignalR will be initialized lazily when connectSignalR is called
+      // This prevents connection attempts on public pages
     }
     setLoading(false);
   }, []);
@@ -97,6 +97,17 @@ export const AuthProvider = ({ children }) => {
     if (signalRConnection) {
       await signalRConnection.stop();
       setSignalRConnection(null);
+    }
+  };
+
+  // Public method to connect SignalR - call this from protected routes (dashboard)
+  const connectSignalR = async () => {
+    if (signalRConnection) {
+      // Already connected
+      return;
+    }
+    if (user?.userId) {
+      await initializeSignalR(user.userId);
     }
   };
 
@@ -180,6 +191,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     loading,
     signalRConnection,
+    connectSignalR, // Call this from dashboard to establish SignalR connection
     forceLogout // For API interceptor to call (defined above)
   };
 

@@ -13,6 +13,9 @@ import {
     useMediaQuery,
     Divider,
     Stack,
+    CircularProgress,
+    Snackbar,
+    Alert,
 } from '@mui/material';
 import {
     LocalTaxi,
@@ -21,14 +24,14 @@ import {
     Star,
     Phone,
     Email,
-    Facebook,
-    Twitter,
-    Instagram,
     KeyboardArrowDown,
     DirectionsCar,
     Groups,
     CheckCircle,
+    LinkedIn,
 } from '@mui/icons-material';
+import InstagramIcon from '@mui/icons-material/Instagram';
+import emailjs from '@emailjs/browser';
 
 const LOGO_URL = '/logo.png';
 const BACKGROUND_IMAGE = 'https://bc-user-uploads.brandcrowd.com/public/media-Production/4fe807e2-7cac-496d-8560-54d74a02003f/94f081cc-3392-451c-bae1-62e060221e91_2x';
@@ -43,16 +46,48 @@ const PublicLandingPage = () => {
         phone: '',
         message: '',
     });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
     const handleInputChange = (e) => {
         setContactForm({ ...contactForm, [e.target.name]: e.target.value });
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        const subject = `Contact from ${contactForm.firstName} ${contactForm.lastName}`;
-        const body = `Name: ${contactForm.firstName} ${contactForm.lastName}%0D%0AEmail: ${contactForm.email}%0D%0APhone: ${contactForm.phone}%0D%0A%0D%0AMessage:%0D%0A${contactForm.message}`;
-        window.location.href = `mailto:contact@shiastransport.com?subject=${encodeURIComponent(subject)}&body=${body}`;
+        setIsSubmitting(true);
+
+        try {
+            // EmailJS Configuration
+            // Sign up at https://www.emailjs.com/ (free: 200 emails/month)
+            // Replace these with your actual EmailJS credentials:
+            const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+            const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID;
+            const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+
+            const templateParams = {
+                from_name: `${contactForm.firstName} ${contactForm.lastName}`,
+                from_email: contactForm.email,
+                phone: contactForm.phone,
+                message: contactForm.message,
+                to_email: 'contact@shiastransport.com',
+                time: new Date().toLocaleString(),
+            };
+
+            await emailjs.send(SERVICE_ID, TEMPLATE_ID, templateParams, PUBLIC_KEY);
+
+            setSnackbar({ open: true, message: 'Message sent successfully! We\'ll get back to you soon.', severity: 'success' });
+            setContactForm({ firstName: '', lastName: '', email: '', phone: '', message: '' });
+        } catch (error) {
+            console.error('Contact form error:', error);
+            setSnackbar({ open: true, message: 'Failed to send message. Please try again later.', severity: 'error' });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleCloseSnackbar = () => {
+        setSnackbar({ ...snackbar, open: false });
     };
 
     const scrollToSection = (sectionId) => {
@@ -575,9 +610,16 @@ const PublicLandingPage = () => {
                                 Follow us on social media
                             </Typography>
                             <Stack direction="row" spacing={1}>
-                                {[Facebook, Twitter, Instagram].map((Icon, i) => (
+                                {[
+                                    { Icon: InstagramIcon, url: 'https://www.instagram.com/shiastransportation' },
+                                    { Icon: LinkedIn, url: 'https://www.linkedin.com/in/shua-borenstein-584715236' },
+                                ].map((social, i) => (
                                     <IconButton
                                         key={i}
+                                        component="a"
+                                        href={social.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
                                         sx={{
                                             color: 'rgba(255,255,255,0.6)',
                                             border: '1px solid rgba(255,255,255,0.1)',
@@ -588,7 +630,7 @@ const PublicLandingPage = () => {
                                             },
                                         }}
                                     >
-                                        <Icon />
+                                        <social.Icon />
                                     </IconButton>
                                 ))}
                             </Stack>
@@ -671,6 +713,7 @@ const PublicLandingPage = () => {
                                 variant="contained"
                                 fullWidth
                                 size="large"
+                                disabled={isSubmitting}
                                 sx={{
                                     bgcolor: '#e94560',
                                     py: 1.5,
@@ -679,14 +722,29 @@ const PublicLandingPage = () => {
                                     '&:hover': {
                                         bgcolor: '#d63d56',
                                     },
+                                    '&:disabled': {
+                                        bgcolor: 'rgba(233, 69, 96, 0.5)',
+                                    },
                                 }}
                             >
-                                Send Message
+                                {isSubmitting ? <CircularProgress size={24} color="inherit" /> : 'Send Message'}
                             </Button>
                         </Paper>
                     </Box>
                 </Container>
             </Box>
+
+            {/* Snackbar for notifications */}
+            <Snackbar
+                open={snackbar.open}
+                autoHideDuration={6000}
+                onClose={handleCloseSnackbar}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+                <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+                    {snackbar.message}
+                </Alert>
+            </Snackbar>
 
             {/* Footer */}
             <Box
