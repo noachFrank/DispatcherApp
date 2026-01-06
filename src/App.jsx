@@ -6,13 +6,15 @@ import LoginPage from './components/LoginPage';
 import MainDashboard from './components/MainDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicLandingPage from './components/PublicLandingPage';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import TermsOfService from './components/TermsOfService';
 import Footer from './components/Footer';
 // import './App.css';
 
 // Wrapper component to conditionally show footer
 const AppContent = () => {
     const location = useLocation();
-    const isPublicPage = location.pathname === '/';
+    const isPublicPage = location.pathname === '/' || location.pathname === '/privacy' || location.pathname === '/terms';
 
     return (
         <div className="app" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -20,6 +22,10 @@ const AppContent = () => {
                 <Routes>
                     {/* Public landing page */}
                     <Route path="/" element={<PublicLandingPage />} />
+
+                    {/* Legal pages */}
+                    <Route path="/privacy" element={<PrivacyPolicy />} />
+                    <Route path="/terms" element={<TermsOfService />} />
 
                     {/* Dispatcher login and dashboard */}
                     <Route path="/login" element={<LoginPage />} />
