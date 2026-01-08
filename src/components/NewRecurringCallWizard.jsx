@@ -291,7 +291,7 @@ const NewRecurringCallWizard = ({ onComplete, onCancel }) => {
 
             if (response.success) {
                 setPricingDetails(response);
-                const carSeatSurcharge = formData.carSeat ? 10 : 0;
+                const carSeatSurcharge = formData.carSeat ? formData.roundTrip ? 20 : 10 : 0;
                 setFormData(prev => ({
                     ...prev,
                     cost: Math.round(response.totalPrice) + carSeatSurcharge,
@@ -589,7 +589,7 @@ const NewRecurringCallWizard = ({ onComplete, onCancel }) => {
             const daysStr = ridesCreated.map(r => r.day).join(', ');
             showToast(`Recurring call created for: ${daysStr}`, 'success');
 
-            //clearForm();
+            clearForm();
             onComplete(ridesCreated);
         } catch (error) {
             console.error('Failed to create recurring ride:', error);
@@ -848,7 +848,7 @@ const NewRecurringCallWizard = ({ onComplete, onCancel }) => {
                                                         sx={{ py: 0.25 }}
                                                     />
                                                 }
-                                                label={<Typography variant="caption">Needs Car Seat (+$10)</Typography>}
+                                                label={<Typography variant="caption">Needs Car Seat</Typography>}
                                                 sx={{ m: 0, height: 24 }}
                                             />
                                         </Box>

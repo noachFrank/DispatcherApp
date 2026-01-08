@@ -46,8 +46,14 @@ const config = {
       RESET_PICKUP: '/api/Ride/ResetPickupTime',
       UPDATE_PRICE: '/api/Ride/UpdatePrice',
       UNSETTLED_RIDES_BY_DRIVER: '/api/Ride/UnsettledRides',
-      SETTLE_DRIVER: '/api/Ride/SettleDriver',
+      SETTLE_UP_DRIVER: '/api/Ride/SettleUpDriver',
       SETTLE_RIDE: '/api/Ride/SettleRide'
+    },
+    INVOICES: {
+      GET_DRIVERS_WITH_INVOICES: '/api/Ride/Invoices/Drivers',
+      GET_DRIVER_INVOICES: '/api/Ride/Invoices/Driver',
+      DOWNLOAD: '/api/Ride/Invoices/Download',
+      RESEND: '/api/Ride/Invoices/Resend'
     },
     DASHBOARD: {
       GET_ALL: '/api/Ride/Dashboard',

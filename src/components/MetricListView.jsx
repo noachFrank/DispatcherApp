@@ -42,7 +42,7 @@ import {
   AccountBalance as SettlementIcon
 } from '@mui/icons-material';
 import DriverMessagingModal from './DriverMessagingModal';
-import { dashboardAPI, driversAPI } from '../services/apiService';
+import { dashboardAPI, driversAPI, ridesAPI } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { useAlert } from '../contexts/AlertContext';
 import { getRideStatus, getRideStatusColor, getRideStatusStyle, getDriverStatusColor } from '../utils/Status';
@@ -233,11 +233,11 @@ const MetricListView = ({
   };
 
   // Settle all rides for a driver
-  const handleSettleDriver = async (driverId) => {
+  const handleSettleUpDriver = async (driverId) => {
     setSettlingDrivers(prev => ({ ...prev, [driverId]: true }));
     try {
-      await dashboardAPI.settleDriver(driverId);
-      showToast('Driver settled successfully', 'success');
+      await dashboardAPI.settleUpDriver(driverId);
+      showToast('Driver settled up successfully', 'success');
       // Remove driver from list
       setData(prev => prev.filter(d => d.id !== driverId));
       // Clear their data
@@ -253,7 +253,7 @@ const MetricListView = ({
       });
     } catch (error) {
       console.error('Error settling driver:', error);
-      showAlert('Error', 'Failed to settle driver. Please try again.', [{ text: 'OK' }], 'error');
+      showAlert('Error', 'Failed to settle up driver. Please try again.', [{ text: 'OK' }], 'error');
     } finally {
       setSettlingDrivers(prev => ({ ...prev, [driverId]: false }));
     }
@@ -985,7 +985,7 @@ const MetricListView = ({
                 <Chip
                   size="small"
                   label={`${unsettledCount} unsettled`}
-                  color={`${unsettledCount >= 20 ? 'error' : unsettledCount >= 10 ? 'warning' : 'default'}`}
+                  color={`${unsettledCount >= 50 ? 'error' : unsettledCount >= 25 ? 'warning' : 'success'}`}
                   icon={<SettlementIcon />}
                 />
               )}
@@ -1098,6 +1098,19 @@ const MetricListView = ({
                         )}
                       </Typography>
                     </Grid>
+                    <Grid item xs={12} >
+                      {/* Settle All button */}
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        fullWidth
+                        onClick={() => handleSettleUpDriver(driver.id)}
+                        disabled={isSettling}
+                        startIcon={isSettling ? <CircularProgress size={20} color="inherit" /> : <SettlementIcon />}
+                      >
+                        {isSettling ? 'Settling Up...' : `Settle Up All (${rides.length}) rides and Send Invoice`}
+                      </Button>
+                    </Grid>
                   </Grid>
                 </Box>
 
@@ -1112,7 +1125,7 @@ const MetricListView = ({
                         <TableCell align="right"><strong>Cost</strong></TableCell>
                         <TableCell align="right"><strong>Driver Comp</strong></TableCell>
                         <TableCell align="right"><strong>Unsettled Amt</strong></TableCell>
-                        <TableCell align="center"><strong>Action</strong></TableCell>
+                        {/* <TableCell align="center"><strong>Action</strong></TableCell> */}
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1145,7 +1158,7 @@ const MetricListView = ({
                                   ride.driversCompensation.toFixed(2))}
                               </Typography>
                             </TableCell>
-                            <TableCell align="center">
+                            {/* <TableCell align="center">
                               <Button
                                 size="small"
                                 variant="outlined"
@@ -1155,7 +1168,7 @@ const MetricListView = ({
                               >
                                 Settle
                               </Button>
-                            </TableCell>
+                            </TableCell> */}
                           </TableRow>
                         );
                       })}
@@ -1163,17 +1176,6 @@ const MetricListView = ({
                   </Table>
                 </TableContainer>
 
-                {/* Settle All button */}
-                <Button
-                  variant="contained"
-                  color="primary"
-                  fullWidth
-                  onClick={() => handleSettleDriver(driver.id)}
-                  disabled={isSettling}
-                  startIcon={isSettling ? <CircularProgress size={20} color="inherit" /> : <SettlementIcon />}
-                >
-                  {isSettling ? 'Settling...' : `Settle All (${rides.length} rides)`}
-                </Button>
               </>
             )}
           </Collapse>

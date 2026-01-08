@@ -399,8 +399,8 @@ export const dashboardAPI = {
     return response.data;
   },
 
-  settleDriver: async (driverId) => {
-    const response = await apiClient.post(config.ENDPOINTS.RIDES.SETTLE_DRIVER, driverId, {
+  settleUpDriver: async (driverId) => {
+    const response = await apiClient.post(config.ENDPOINTS.RIDES.SETTLE_UP_DRIVER, driverId, {
       headers: { 'Content-Type': 'application/json' }
     });
     return response.data;
@@ -411,6 +411,36 @@ export const dashboardAPI = {
       headers: { 'Content-Type': 'application/json' }
     });
     return response.data;
+  }
+};
+
+// Invoices API
+export const invoicesAPI = {
+  getDriversWithInvoices: async () => {
+    const response = await apiClient.get(config.ENDPOINTS.INVOICES.GET_DRIVERS_WITH_INVOICES);
+    return response.data;
+  },
+
+  getDriverInvoices: async (driverId) => {
+    const response = await apiClient.get(`${config.ENDPOINTS.INVOICES.GET_DRIVER_INVOICES}/${driverId}`);
+    return response.data;
+  },
+
+  downloadInvoice: async (invoiceNumber) => {
+    const response = await apiClient.get(
+      `${config.ENDPOINTS.INVOICES.DOWNLOAD}/${invoiceNumber}`,
+      { responseType: 'blob' }
+    );
+    return response.data;
+  },
+
+  resendInvoice: async (invoiceNumber) => {
+    const response = await apiClient.post(config.ENDPOINTS.INVOICES.RESEND, { invoiceNumber });
+    return response.data;
+  },
+
+  getDownloadUrl: (invoiceNumber) => {
+    return `${config.API_BASE_URL}${config.ENDPOINTS.INVOICES.DOWNLOAD}/${invoiceNumber}`;
   }
 };
 
